@@ -1,0 +1,76 @@
+:root {
+  --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
+  --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
+  --green:#4ade80; --red:#f87171; --border:#334155;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.4}
+
+.container{max-width:1400px;margin:0 auto;padding:32px 24px 64px}
+header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;
+       border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:28px}
+h1{margin:0;font-size:1.75rem;font-weight:600}
+h1 .account{color:var(--accent)}
+.meta{color:var(--muted);font-size:.9rem;text-align:right}
+.meta div + div{margin-top:2px}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.card .label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+.card .value{font-size:1.6rem;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.card.tob .value{color:var(--accent)}
+
+.table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+table.trades{width:100%;border-collapse:collapse;font-size:.88rem}
+table.trades thead th{background:var(--panel-2);color:var(--muted);font-weight:600;text-align:left;
+       padding:10px 12px;text-transform:uppercase;font-size:.72rem;letter-spacing:.05em;
+       border-bottom:1px solid var(--border);position:sticky;top:0}
+table.trades tbody td{padding:8px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+table.trades tbody tr:last-child td{border-bottom:none}
+table.trades tbody tr:hover{background:rgba(56,189,248,0.06)}
+
+td.num,th.num{text-align:right}
+td.check-col,th.check-col{width:40px;text-align:center;padding:6px}
+input[type="checkbox"]{accent-color:var(--accent);cursor:pointer;width:16px;height:16px}
+
+.buy{color:var(--green);font-weight:600}
+.sell{color:var(--red);font-weight:600}
+tr.excluded{opacity:.35}
+tr.excluded td.buy,tr.excluded td.sell{color:var(--muted) !important}
+
+.filters{display:flex;flex-wrap:wrap;gap:12px;align-items:center;
+       background:var(--panel);border:1px solid var(--border);border-radius:10px;
+       padding:14px 18px;margin-bottom:20px}
+.filters label{color:var(--muted);font-size:.85rem;display:flex;align-items:center;gap:6px}
+.filters input[type="date"]{background:var(--bg);color:var(--text);border:1px solid var(--border);
+       border-radius:6px;padding:5px 8px;font:inherit;color-scheme:dark}
+.filters button{background:var(--panel-2);color:var(--text);border:1px solid var(--border);
+       border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+.filters button:hover{border-color:var(--accent);color:var(--accent)}
+.filters .spacer{flex:1}
+.filters .count{color:var(--muted);font-size:.85rem}
+.filters .count strong{color:var(--text);font-variant-numeric:tabular-nums}
+
+.src-override{color:var(--accent);font-weight:600;font-size:.8rem}
+.src-ecb{color:var(--muted);font-size:.8rem}
+
+body.privacy .card .value,
+body.privacy td.num,
+body.privacy .count strong{filter:blur(6px);transition:filter .2s;user-select:none}
+body.privacy .card .value:hover,
+body.privacy td.num:hover,
+body.privacy .count strong:hover{filter:none}
+
+#privacy-toggle{position:fixed;top:16px;right:16px;background:var(--panel);border:1px solid var(--border);
+       color:var(--text);border-radius:999px;width:38px;height:38px;font-size:1.1rem;line-height:1;
+       cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:100;padding:0}
+#privacy-toggle:hover{border-color:var(--accent);color:var(--accent)}
+
+.year-picker{display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.year-picker .label{color:var(--muted);font-size:.85rem;margin-right:4px}
+.year-btn{background:var(--panel);color:var(--muted);border:1px solid var(--border);border-radius:6px;
+       padding:6px 14px;font:inherit;font-size:.9rem;cursor:pointer;transition:all .15s}
+.year-btn:hover{color:var(--text);border-color:var(--accent)}
+.year-btn.active{background:var(--accent);color:#0f172a;border-color:var(--accent);font-weight:600}
+
+footer{margin-top:24px;color:var(--muted);font-size:.8rem;text-align:center}

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Phoenix — Belgian CGT — {{ account }}</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
+<style>{{ css | safe }}</style>
+</head>
+<body>
+<button id="privacy-toggle" title="Hide/show values" aria-label="Toggle privacy">👁</button>
+<div class="container">
+  <h1>Belgian Capital Gains Tax — <span class="account">{{ account }}</span>
+    <span class="tag">{{ method }}</span>
+    <span class="tag">10% from {{ regime_start }}</span>
+  </h1>
+  <div class="muted">Report built: {{ now }} · Reset date: {{ reset_date }}
+    {% if fx_2025_12_31 %}· EUR/USD on reset date: {{ "%.4f"|format(fx_2025_12_31) }}{% endif %}
+  </div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Total taxable years</div>
+      <div class="value">{{ years_count }}</div></div>
+    <div class="card pnl"><div class="label">Total net (EUR, all yrs)</div>
+      <div class="value {{ 'pos' if total_net_eur >= 0 else 'neg' }}">{{ "{:,.2f}".format(total_net_eur) }}</div></div>
+    <div class="card"><div class="label">Total exemption used (EUR)</div>
+      <div class="value">{{ "{:,.2f}".format(total_exemption_used_eur) }}</div></div>
+    <div class="card"><div class="label">Total taxable (EUR)</div>
+      <div class="value">{{ "{:,.2f}".format(total_taxable_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Total tax due (EUR)</div>
+      <div class="value {{ 'neg' if total_tax_eur > 0 else 'muted' }}">{{ "{:,.2f}".format(total_tax_eur) }}</div></div>
+    <div class="card"><div class="label">Carry-forward bank (EUR)</div>
+      <div class="value">{{ "{:,.2f}".format(carry_balance_eur) }}</div></div>
+  </section>
+
+  <div class="rules-box">
+    <strong>Rules applied (Belgium, KPMG July 2025 draft):</strong>
+    <ul>
+      <li>Flat <strong>{{ "%.0f"|format(tax_rate_pct) }}%</strong> rate on net realized gains (gains − losses) per calendar year.</li>
+      <li>Annual exemption: <strong>{{ "{:,.0f}".format(annual_exemption) }} EUR</strong> per taxpayer. Up to
+          <strong>{{ "{:,.0f}".format(max_yearly_carry) }} EUR/year</strong> of unused exemption rolls forward,
+          banked balance capped at <strong>{{ "{:,.0f}".format(max_carry_bank) }} EUR</strong>.</li>
+      <li>Pre-2026 lots: cost basis is reset to the 2025-12-31 close
+          <em>or the original buy basis if it is higher</em> (favorable to the taxpayer for 5 years).</li>
+      <li>Losses offset gains <strong>within the same year only</strong>; no carry-forward of losses.</li>
+      <li>All gains realized on or before <strong>2025-12-31 are exempt</strong> under the transitional rule.</li>
+      {% if auto_changes_count %}
+      <li><strong>{{ auto_changes_count }} ticker rename{% if auto_changes_count != 1 %}s{% endif %}</strong>
+          auto-detected from snapshot reconciliation (e.g. a Chapter-11 ticker rename with a "Q" suffix).
+          Cost basis rolls forward through these renames so the loss is claimed on the
+          eventual close, not on the rename date. See the
+          <strong>Detected renames</strong> tab to audit each one.</li>
+      {% endif %}
+    </ul>
+    <div class="muted" style="margin-top:6px">
+      Not implemented here: 33% on internal capital gains (sale to a controlled company),
+      progressive scheme for substantial shareholdings (≥20%), 16.5% on transfers to non-EEA entities.
+      If those apply to you, this calculator is incomplete — consult your accountant.
+    </div>
+  </div>
+
+  {% if marks_missing > 0 %}
+  <div class="warning-box">
+    <strong>⚠ {{ marks_missing }} symbol{{ 's' if marks_missing != 1 }} missing 2025-12-31 mark</strong> —
+    out of {{ marks_total }} needed. For those trades the calculator falls back to the original buy basis
+    (which may overstate or understate the gain). Add the missing prices manually to fix.
+  </div>
+  {% endif %}
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-target="tab-summary"     role="tab">Annual summary</button>
+    <button class="tab"        data-target="tab-offset"      role="tab">Loss offset detail</button>
+    <button class="tab"        data-target="tab-trades"      role="tab">Per-trade detail</button>
+    <button class="tab"        data-target="tab-marks"       role="tab">Year-end marks</button>
+    <button class="tab"        data-target="tab-renames"     role="tab">Detected renames{% if auto_changes_count %} ({{ auto_changes_count }}){% endif %}</button>
+  </div>
+
+  <!-- Annual summary tab -->
+  <div id="tab-summary" class="tab-panel active" role="tabpanel">
+    <h3>Per-year tax computation</h3>
+    <div class="muted" style="margin-bottom:8px">
+      Gains and losses are first netted within the year (loss offsets profit).
+      Then the exemption is applied: this year's <strong>€{{ "{:,.0f}".format(annual_exemption) }}</strong>
+      base first, then the carry-forward bank if needed.
+      Whatever remains × <strong>{{ "%.0f"|format(tax_rate_pct) }}%</strong> = tax due.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Year</th>
+          <th class="num">Gains (EUR)</th>
+          <th class="num">Losses (EUR)</th>
+          <th class="num">Net (EUR)</th>
+          <th class="num">Carry in</th>
+          <th class="num">Exemption used</th>
+          <th class="num">Carry out</th>
+          <th class="num">Taxable (EUR)</th>
+          <th class="num">Tax @ {{ "%.0f"|format(tax_rate_pct) }}%</th>
+        </tr></thead>
+        <tbody>{{ annual_rows | safe }}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Loss offset detail tab -->
+  <div id="tab-offset" class="tab-panel" role="tabpanel">
+    <h3>Loss-offset breakdown by year</h3>
+    <div class="muted" style="margin-bottom:8px">
+      Inside each year, losses cancel gains <strong>1:1</strong> before the exemption applies.
+      Click a year to expand its top-5 contributors on each side.
+    </div>
+    {% if offset_blocks %}
+      {{ offset_blocks | safe }}
+    {% else %}
+      <div class="empty-state muted">No taxable years yet — all gains through 2025-12-31 are exempt.</div>
+    {% endif %}
+  </div>
+
+  <!-- Per-trade detail tab -->
+  <div id="tab-trades" class="tab-panel" role="tabpanel">
+    <h3>Per-trade tax calculation (taxable trades only)</h3>
+    <div class="muted" style="margin-bottom:8px">
+      Each row shows the basis decision: <em>reset 2025-12-31</em> when the year-end mark
+      gives a higher basis, <em>original (higher)</em> when the original buy basis was already higher,
+      or <em>original (mark missing)</em> when no 2025-12-31 mark is available.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Symbol</th>
+          <th>Buy date</th>
+          <th>Sell date</th>
+          <th>Close type</th>
+          <th class="num">Qty</th>
+          <th class="num">Buy px (USD)</th>
+          <th class="num">2025-12-31 (USD)</th>
+          <th>Basis used</th>
+          <th class="num">Tax basis (EUR)</th>
+          <th class="num">Proceeds (EUR)</th>
+          <th class="num">P&amp;L (EUR)</th>
+        </tr></thead>
+        <tbody>{{ per_trade_rows | safe }}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Detected renames tab -->
+  <div id="tab-renames" class="tab-panel" role="tabpanel">
+    <h3>Auto-detected ticker renames</h3>
+    <div class="muted" style="margin-bottom:8px">
+      When a symbol disappears between IBKR snapshots and another symbol appears
+      with matching quantity (after accounting for trades, transfers, splits, and
+      explicit corporate actions), the matcher treats it as a non-taxable rollover
+      so the basis follows the security through bankruptcy / CUSIP changes / etc.
+      <br><br>
+      Common pattern: a stock entering Chapter 11 gets a "Q" suffix
+      (e.g. <code>ABC → ABCQ</code>), or is renamed entirely after an FDIC
+      takeover or multi-step bankruptcy reorganization
+      (e.g. <code>ABC → ABCQ → XYZ</code>).
+      <br><br>
+      <strong>Please audit each entry below.</strong> If something looks wrong (e.g. two unrelated
+      bankrupt stocks coincidentally matched), tell us and we'll add a manual override.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Date</th>
+          <th>Rename</th>
+          <th class="num">Qty rolled</th>
+          <th>Detection rationale</th>
+        </tr></thead>
+        <tbody>{{ auto_changes_rows | safe }}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Year-end marks tab -->
+  <div id="tab-marks" class="tab-panel" role="tabpanel">
+    <h3>Year-end marks ({{ reset_date }})</h3>
+    <div class="muted" style="margin-bottom:8px">
+      <strong>{{ marks_have }} of {{ marks_total }}</strong> marks present.
+      Symbols not on Yahoo (delisted / OTC pinks) need a manual entry to compute tax correctly.
+      Use the dashboard "Refresh marks" button to retry Yahoo.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Symbol</th>
+          <th class="num">Close price</th>
+          <th>Source</th>
+          <th>Fetched</th>
+        </tr></thead>
+        <tbody>{{ marks_rows | safe }}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Computed using {{ method }} matching · 10% rate · €{{ "{:,.0f}".format(annual_exemption) }} annual exemption · €{{ "{:,.0f}".format(max_yearly_carry) }}/yr rollover (cap €{{ "{:,.0f}".format(max_carry_bank) }})</footer>
+</div>
+
+<script>{{ js | safe }}</script>
+</body>
+</html>

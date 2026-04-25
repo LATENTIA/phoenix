@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phoenix — P&L Performance mockup</title>
+<style>
+:root{--bg:#0f172a;--panel:#1e293b;--panel-2:#273449;--text:#e2e8f0;--muted:#94a3b8;
+      --accent:#38bdf8;--green:#4ade80;--red:#f87171;--orange:#fb923c;--yellow:#facc15;--border:#334155}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+.container{max-width:1400px;margin:0 auto;padding:32px 24px 64px}
+h1{margin:0 0 8px;font-size:1.75rem}
+h1 .account{color:var(--accent)}
+h3{margin:0 0 8px;font-size:.95rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.muted{color:var(--muted);font-size:.9rem}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--panel-2);color:var(--muted);font-size:.75rem;margin-left:8px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:0 0 24px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.card .label{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+.card .value{font-size:1.4rem;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.value.pos{color:var(--green)} .value.neg{color:var(--red)}
+.equity-curve-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px}
+.ec-svg{display:block;width:100%;height:auto}
+.ec-grid{stroke:var(--border);stroke-width:1;stroke-dasharray:2 4}
+.ec-axis{fill:var(--muted);font-size:10px}
+.ec-dd-h{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;opacity:.6}
+.ec-dd-v{stroke:var(--red);stroke-width:1.5;stroke-dasharray:3 3}
+.ec-peak{fill:var(--muted)} .ec-trough{fill:var(--red)}
+.table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:.86rem}
+thead th{background:var(--panel-2);color:var(--muted);text-align:left;padding:9px 12px;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+td,th{padding:7px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.num{text-align:right} .pos{color:var(--green)} .neg{color:var(--red)}
+.dist-bar-cell{padding:6px 12px;width:35%}
+.dist-bar{height:14px;border-radius:3px;min-width:1px}
+.dist-bar-win{background:rgba(74,222,128,.45)} .dist-bar-loss{background:rgba(248,113,113,.45)}
+.mockup-banner{background:rgba(250,204,21,.1);border:1px dashed var(--yellow);color:var(--yellow);text-align:center;padding:8px;font-size:.82rem;border-radius:6px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="mockup-banner">📄 Illustrative mockup — all numbers, tickers and dates are fictional examples</div>
+
+  <h1>Performance analysis — <span class="account">example</span> <span class="tag">FIFO</span></h1>
+  <div class="muted" style="margin-bottom:16px">Multi-year realized P&amp;L · sample data · all figures fictional</div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Total realized P&amp;L (EUR)</div><div class="value pos">+10,000.00</div></div>
+    <div class="card"><div class="label">ROI on invested basis</div><div class="value pos">+15.00%</div></div>
+    <div class="card"><div class="label">Closed trades</div><div class="value">300</div></div>
+    <div class="card"><div class="label">Win rate</div><div class="value">58.0%</div></div>
+    <div class="card"><div class="label">Profit factor</div><div class="value">1.40</div></div>
+  </section>
+
+  <section class="cards">
+    <div class="card"><div class="label">Avg win (EUR)</div><div class="value pos">+150.00</div></div>
+    <div class="card"><div class="label">Avg loss (EUR)</div><div class="value neg">−100.00</div></div>
+    <div class="card"><div class="label">Best single trade</div><div class="value pos">+1,500.00</div></div>
+    <div class="card"><div class="label">Worst single trade</div><div class="value neg">−2,000.00</div></div>
+    <div class="card"><div class="label">Total basis invested (EUR)</div><div class="value">66,000.00</div></div>
+  </section>
+
+  <h3>Equity curve (cumulative realized P&amp;L, EUR)</h3>
+  <div class="equity-curve-wrap">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" class="ec-svg" preserveAspectRatio="none">
+      <line x1="56" y1="42" x2="704" y2="42" class="ec-grid"/>
+      <text x="50" y="45" class="ec-axis" text-anchor="end">10,000</text>
+      <line x1="56" y1="120" x2="704" y2="120" class="ec-grid"/>
+      <text x="50" y="123" class="ec-axis" text-anchor="end">3,000</text>
+      <line x1="56" y1="172" x2="704" y2="172" class="ec-grid"/>
+      <text x="50" y="175" class="ec-axis" text-anchor="end">0</text>
+      <line x1="56" y1="206" x2="704" y2="206" class="ec-grid"/>
+      <text x="50" y="209" class="ec-axis" text-anchor="end">−3,000</text>
+
+      <path d="M 56,176 L 90,178 L 130,170 L 170,165 L 210,160 L 250,155 L 290,142 L 320,135 L 350,118 L 380,112 L 415,200 L 440,206 L 470,194 L 500,184 L 530,165 L 560,140 L 590,108 L 620,82 L 660,65 L 704,42 L 704,172 L 56,172 Z"
+            fill="rgba(74,222,128,.18)" stroke="none"/>
+      <path d="M 56,176 L 90,178 L 130,170 L 170,165 L 210,160 L 250,155 L 290,142 L 320,135 L 350,118 L 380,112 L 415,200 L 440,206 L 470,194 L 500,184 L 530,165 L 560,140 L 590,108 L 620,82 L 660,65 L 704,42"
+            fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
+
+      <line x1="380" y1="112" x2="440" y2="112" class="ec-dd-h"/>
+      <line x1="440" y1="112" x2="440" y2="206" class="ec-dd-v"/>
+      <circle cx="380" cy="112" r="3.5" class="ec-peak"/>
+      <circle cx="440" cy="206" r="3.5" class="ec-trough"/>
+
+      <text x="56" y="216" class="ec-axis">YYYY-MM-DD</text>
+      <text x="704" y="216" class="ec-axis" text-anchor="end">YYYY-MM-DD</text>
+    </svg>
+  </div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Max drawdown (EUR)</div><div class="value neg">−7,000.00</div></div>
+    <div class="card"><div class="label">Peak → trough</div><div class="value" style="font-size:1rem">YYYY-MM-DD → YYYY-MM-DD</div></div>
+    <div class="card"><div class="label">Recovered</div><div class="value pos">YYYY-MM-DD</div></div>
+  </section>
+
+  <h3>FX vs price decomposition</h3>
+  <div class="muted" style="margin:0 0 8px;font-size:.85rem">
+    Splits each year's realized P&amp;L into the part driven by USD price moves vs the part driven by EUR/USD movement during the holding period. <strong>Total = Price + FX</strong>.
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Year</th><th class="num">Total (EUR)</th><th class="num">Price (EUR)</th><th class="num">FX (EUR)</th><th class="num">FX share</th></tr></thead>
+      <tbody>
+        <tr><td>YEAR 1</td><td class="num pos"><strong>+1,000.00</strong></td><td class="num pos">+900.00</td><td class="num pos">+100.00</td><td class="num muted">+10.0%</td></tr>
+        <tr><td>YEAR 2</td><td class="num neg"><strong>−2,000.00</strong></td><td class="num neg">−2,200.00</td><td class="num pos">+200.00</td><td class="num muted">−10.0%</td></tr>
+        <tr><td>YEAR 3</td><td class="num pos"><strong>+5,000.00</strong></td><td class="num pos">+6,000.00</td><td class="num neg">−1,000.00</td><td class="num muted">−20.0%</td></tr>
+        <tr><td>YEAR 4</td><td class="num pos"><strong>+6,000.00</strong></td><td class="num pos">+7,000.00</td><td class="num neg">−1,000.00</td><td class="num muted">−16.7%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Distribution of trade outcomes</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Return bucket</th><th class="num">Trades</th><th class="num">Total (EUR)</th><th>Distribution</th></tr></thead>
+      <tbody>
+        <tr><td>&lt; -50%</td><td class="num">120</td><td class="num neg">−15,000</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-loss" style="width:100%"></div></td></tr>
+        <tr><td>-50…-25%</td><td class="num">15</td><td class="num neg">−1,200</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-loss" style="width:12%"></div></td></tr>
+        <tr><td>-25…-10%</td><td class="num">20</td><td class="num neg">−400</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-loss" style="width:16%"></div></td></tr>
+        <tr><td>-10…0%</td><td class="num">15</td><td class="num neg">−100</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-loss" style="width:12%"></div></td></tr>
+        <tr><td>0…10%</td><td class="num">15</td><td class="num pos">+100</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-win" style="width:12%"></div></td></tr>
+        <tr><td>10…25%</td><td class="num">15</td><td class="num pos">+500</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-win" style="width:12%"></div></td></tr>
+        <tr><td>25…50%</td><td class="num">25</td><td class="num pos">+2,000</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-win" style="width:18%"></div></td></tr>
+        <tr><td>50…100%</td><td class="num">30</td><td class="num pos">+5,000</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-win" style="width:24%"></div></td></tr>
+        <tr><td>&gt; 100%</td><td class="num">45</td><td class="num pos">+18,000</td><td class="dist-bar-cell"><div class="dist-bar dist-bar-win" style="width:36%"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="muted" style="font-size:.82rem">
+    Wide tails on the right (big winners) plus heavy left tail (delistings, options expirations) is the typical asymmetric-payoff signature.
+  </div>
+</div>
+</body>
+</html>

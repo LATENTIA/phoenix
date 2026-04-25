@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 100" role="img" aria-label="Phoenix">
+  <title>Phoenix</title>
+  <!-- Single-colour version. Inherits via currentColor. -->
+
+  <line x1="40" y1="86" x2="40" y2="96"
+        stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <rect x="22" y="32" width="36" height="54" rx="6" fill="currentColor"/>
+  <path d="
+    M 40 32
+    L 40 22
+    C 40 12, 50 8, 56 14
+    C 60 18, 56 22, 50 22"
+    stroke="currentColor" stroke-width="6" fill="none"
+    stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

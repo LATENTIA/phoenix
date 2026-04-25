@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 160" role="img" aria-label="Phoenix">
+  <title>Phoenix</title>
+
+  <!-- Tile + logo on the left -->
+  <g transform="translate(16, 16)">
+    <rect x="0" y="0" width="128" height="128" rx="22" fill="#0f172a"/>
+    <rect x="0.5" y="0.5" width="127" height="127" rx="21.5"
+          fill="none" stroke="#1e293b" stroke-width="1"/>
+
+    <g transform="translate(28.8, 26) scale(0.88)">
+      <line x1="40" y1="86" x2="40" y2="96"
+            stroke="#4ade80" stroke-width="6" stroke-linecap="round"/>
+      <rect x="22" y="32" width="36" height="54" rx="6" fill="#4ade80"/>
+      <path d="
+        M 40 32
+        L 40 22
+        C 40 12, 50 8, 56 14
+        C 60 18, 56 22, 50 22"
+        stroke="#4ade80" stroke-width="6" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <text x="172" y="100"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="72" font-weight="700"
+        fill="#4ade80"
+        letter-spacing="-2">phoenix</text>
+</svg>

@@ -1,0 +1,116 @@
+:root {
+  --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
+  --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
+  --green:#4ade80; --red:#f87171; --orange:#fb923c;
+  --yellow:#facc15; --border:#334155;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+.container{max-width:1400px;margin:0 auto;padding:32px 24px 64px}
+h1{margin:0 0 8px;font-size:1.75rem}
+h1 .account{color:var(--accent)}
+h3{margin:24px 0 8px;font-size:1.05rem;color:var(--text)}
+h4{margin:0 0 6px;font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.muted{color:var(--muted);font-size:.9rem}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--panel-2);
+     color:var(--muted);font-size:.75rem;letter-spacing:.05em;margin-left:8px}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:24px 0}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.card .label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+.card .value{font-size:1.5rem;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.card.pnl .value.pos{color:var(--green)}
+.card.pnl .value.neg{color:var(--red)}
+.value.muted{color:var(--muted)}
+.value.pos{color:var(--green)} .value.neg{color:var(--red)}
+
+.table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+thead th{background:var(--panel-2);color:var(--muted);text-align:left;padding:10px 12px;
+       text-transform:uppercase;font-size:.72rem;letter-spacing:.05em;
+       border-bottom:1px solid var(--border);position:sticky;top:0}
+td,th{padding:8px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.num{text-align:right}
+.pos{color:var(--green)} .neg{color:var(--red)}
+
+.rules-box{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);
+           border-radius:6px;padding:14px 18px;margin:16px 0;font-size:.88rem}
+.rules-box ul{margin:6px 0 0;padding-left:20px}
+.rules-box li{margin-bottom:4px}
+
+.warning-box{background:rgba(251,146,60,.08);border:1px solid var(--orange);border-left:3px solid var(--orange);
+             border-radius:6px;padding:12px 16px;margin:16px 0;color:#fed7aa}
+
+/* ---------- Basis-source tags ---------- */
+.basis-tag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:.72rem;
+           letter-spacing:.03em;font-weight:600;text-transform:uppercase}
+.tag-reset{background:rgba(56,189,248,.18);color:var(--accent);
+           border:1px solid rgba(56,189,248,.4)}
+.tag-orig-higher{background:rgba(74,222,128,.15);color:var(--green);
+                 border:1px solid rgba(74,222,128,.4)}
+.tag-orig{background:var(--panel-2);color:var(--muted);border:1px solid var(--border)}
+.tag-missing{background:rgba(248,113,113,.15);color:var(--red);
+             border:1px solid rgba(248,113,113,.4)}
+.tag-yahoo{background:rgba(168,85,247,.15);color:#c4b5fd;
+           border:1px solid rgba(168,85,247,.4)}
+.tag-ibkr{background:rgba(56,189,248,.18);color:var(--accent);
+          border:1px solid rgba(56,189,248,.4)}
+.tag-manual{background:rgba(250,204,21,.15);color:var(--yellow);
+            border:1px solid rgba(250,204,21,.4)}
+
+/* ---------- Tabs ---------- */
+.tabs{display:flex;gap:4px;margin:32px 0 16px;border-bottom:1px solid var(--border)}
+.tab{background:transparent;border:none;color:var(--muted);padding:10px 18px;font:inherit;font-size:.9rem;
+     cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+     transition:color .15s,border-color .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* Isolated mode (?tab=trades from dashboard) hides chrome */
+body.isolated-tab .tabs{display:none !important}
+body.isolated-tab > .container > .cards{display:none !important}
+body.isolated-tab > .container > .rules-box{display:none !important}
+body.isolated-tab > .container > h1,
+body.isolated-tab > .container > .muted,
+body.isolated-tab > .container > .warning-box{display:none !important}
+body.isolated-tab .container{padding-top:12px}
+
+/* ---------- Year offset blocks ---------- */
+.year-block{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+.year-block summary{padding:10px 14px;cursor:pointer;list-style:none;
+                    display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:.95rem}
+.year-block summary::-webkit-details-marker{display:none}
+.year-block summary::before{content:"▶";font-size:.7rem;color:var(--muted);transition:transform .2s;display:inline-block}
+.year-block[open] summary::before{transform:rotate(90deg)}
+.year-block summary > strong:first-of-type{font-size:1.05rem}
+.offset-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 14px 12px}
+.offset-summary{background:var(--panel-2);padding:10px 14px;border-top:1px solid var(--border);
+                font-size:.88rem;line-height:1.6}
+.offset-summary strong{font-variant-numeric:tabular-nums}
+
+.empty-state{padding:40px;text-align:center;background:var(--panel);
+             border:1px solid var(--border);border-radius:10px}
+
+/* Force-close rows (bankruptcy / delisting / merger) get a subtle red bar on the left
+   so they stand out from regular sells in the per-trade table. */
+.forced-close-row td:first-child{border-left:3px solid var(--red)}
+.forced-close-row{background:rgba(248,113,113,.04)}
+
+.loss-breakdown{background:rgba(248,113,113,.08);
+                border-top:1px solid rgba(248,113,113,.3) !important}
+
+/* ---------- Privacy toggle ---------- */
+body.privacy .card .value,
+body.privacy td.num{filter:blur(6px);transition:filter .2s;user-select:none}
+body.privacy .card .value:hover,
+body.privacy td.num:hover{filter:none}
+
+#privacy-toggle{position:fixed;top:16px;right:16px;background:var(--panel);border:1px solid var(--border);
+       color:var(--text);border-radius:999px;width:38px;height:38px;font-size:1.1rem;line-height:1;
+       cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:100;padding:0}
+#privacy-toggle:hover{border-color:var(--accent);color:var(--accent)}
+
+footer{margin-top:24px;color:var(--muted);font-size:.8rem;text-align:center}

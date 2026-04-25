@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>No data — {{ kind }}</title>
+<style>
+  body{margin:0;background:#0f172a;color:#94a3b8;font-family:-apple-system,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}
+  .box{padding:48px;border:1px dashed #334155;border-radius:12px;max-width:520px}
+  .box h1{color:#e2e8f0;font-size:1.2rem;margin:0 0 8px}
+  .box code{background:#273449;padding:2px 6px;border-radius:4px;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>No {{ kind }} data for {{ account }}</h1>
+  <p>The database has no trades for this account yet.<br>
+  Click <code>⚡ Load data</code> in the dashboard to download and ingest.</p>
+</div>
+</body>
+</html>

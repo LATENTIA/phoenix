@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 900" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+  <rect width="1280" height="900" fill="#0f172a"/>
+
+  <!-- Banner -->
+  <rect x="40" y="20" width="1200" height="22" rx="4" fill="rgba(250,204,21,0.1)" stroke="#facc15" stroke-dasharray="3 3"/>
+  <text x="640" y="36" fill="#facc15" font-size="11" text-anchor="middle">📄 Illustrative mockup — all numbers, tickers and dates are fictional examples</text>
+
+  <!-- Header -->
+  <text x="40" y="84" fill="#e2e8f0" font-size="26" font-weight="700">Belgian Capital Gains Tax — </text>
+  <text x="430" y="84" fill="#38bdf8" font-size="26" font-weight="700">example</text>
+  <rect x="556" y="62" width="56" height="22" rx="4" fill="#273449"/><text x="566" y="78" fill="#94a3b8" font-size="11">FIFO</text>
+  <rect x="618" y="62" width="156" height="22" rx="4" fill="#273449"/><text x="628" y="78" fill="#94a3b8" font-size="11">10% from 2026-01-01</text>
+  <text x="40" y="108" fill="#94a3b8" font-size="13">Report built: 2026-XX-XX HH:MM:SS · Reset date: 2025-12-31 · EUR/USD on reset date: 1.1xxx</text>
+
+  <!-- KPI cards (6 across) -->
+  <g transform="translate(40,128)">
+    <g><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">TAXABLE YEARS</text>
+       <text x="16" y="64" fill="#e2e8f0" font-size="24" font-weight="700">1</text></g>
+    <g transform="translate(202,0)"><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">TOTAL NET (EUR)</text>
+       <text x="16" y="64" fill="#4ade80" font-size="22" font-weight="700">+15,000.00</text></g>
+    <g transform="translate(404,0)"><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">EXEMPTION USED</text>
+       <text x="16" y="64" fill="#e2e8f0" font-size="22" font-weight="700">10,000.00</text></g>
+    <g transform="translate(606,0)"><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">TAXABLE (EUR)</text>
+       <text x="16" y="64" fill="#e2e8f0" font-size="22" font-weight="700">5,000.00</text></g>
+    <g transform="translate(808,0)"><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">TAX DUE (EUR)</text>
+       <text x="16" y="64" fill="#f87171" font-size="22" font-weight="700">500.00</text></g>
+    <g transform="translate(1010,0)"><rect width="190" height="84" rx="10" fill="#1e293b" stroke="#334155"/>
+       <text x="16" y="26" fill="#94a3b8" font-size="11" letter-spacing="0.5">CARRY-FORWARD</text>
+       <text x="16" y="64" fill="#e2e8f0" font-size="22" font-weight="700">0.00</text></g>
+  </g>
+
+  <!-- Rules box -->
+  <rect x="40" y="232" width="1200" height="148" rx="6" fill="#1e293b" stroke="#334155"/>
+  <line x1="40" y1="232" x2="40" y2="380" stroke="#38bdf8" stroke-width="3"/>
+  <text x="56" y="256" fill="#e2e8f0" font-size="13" font-weight="700">Rules applied (Belgium, KPMG July 2025 draft):</text>
+  <g fill="#e2e8f0" font-size="12">
+    <text x="68" y="280">• Flat <tspan font-weight="700">10%</tspan> rate on net realized gains (gains − losses) per calendar year</text>
+    <text x="68" y="298">• Annual exemption: <tspan font-weight="700">€10,000</tspan>. Up to <tspan font-weight="700">€1,000/year</tspan> of unused exemption rolls forward, banked balance capped at <tspan font-weight="700">€15,000</tspan></text>
+    <text x="68" y="316">• Pre-2026 lots: cost basis is reset to the 2025-12-31 close <tspan font-style="italic">or the original buy basis if it is higher</tspan></text>
+    <text x="68" y="334">• Losses offset gains <tspan font-weight="700">within the same year only</tspan>; no carry-forward of losses</text>
+    <text x="68" y="352">• All gains realized on or before <tspan font-weight="700">2025-12-31 are exempt</tspan> under the transitional rule</text>
+    <text x="68" y="370">• <tspan font-weight="700">Ticker renames auto-detected</tspan> from snapshot reconciliation (e.g. Chapter 11 "Q" suffix)</text>
+  </g>
+
+  <!-- Tabs -->
+  <line x1="40" y1="430" x2="1240" y2="430" stroke="#334155"/>
+  <text x="60" y="424" fill="#94a3b8" font-size="13">Annual summary</text>
+  <text x="186" y="424" fill="#38bdf8" font-size="13" font-weight="700">Loss offset detail</text>
+  <line x1="178" y1="430" x2="298" y2="430" stroke="#38bdf8" stroke-width="2"/>
+  <text x="324" y="424" fill="#94a3b8" font-size="13">Per-trade detail</text>
+  <text x="448" y="424" fill="#94a3b8" font-size="13">Year-end marks</text>
+  <text x="568" y="424" fill="#94a3b8" font-size="13">Detected renames</text>
+
+  <!-- Year block summary bar -->
+  <rect x="40" y="450" width="1200" height="46" rx="8" fill="#1e293b" stroke="#334155"/>
+  <text x="60" y="480" fill="#94a3b8" font-size="14">▼  </text>
+  <text x="80" y="480" fill="#e2e8f0" font-size="16" font-weight="700">2026</text>
+  <text x="130" y="480" fill="#94a3b8" font-size="13">N trades</text>
+  <text x="220" y="480" fill="#4ade80" font-size="14">+20,000.00</text>
+  <text x="340" y="480" fill="#f87171" font-size="14">−5,000.00</text>
+  <text x="460" y="480" fill="#4ade80" font-size="14" font-weight="700">= +15,000.00</text>
+
+  <!-- Two side-by-side tables: gains / losses -->
+  <g transform="translate(40,508)">
+    <text x="20" y="14" fill="#94a3b8" font-size="11" letter-spacing="0.5" font-weight="600">ALL GAINS BY SYMBOL</text>
+    <rect x="0" y="22" width="580" height="170" rx="8" fill="#1e293b" stroke="#334155"/>
+    <rect x="0" y="22" width="580" height="30" fill="#273449"/>
+    <g fill="#94a3b8" font-size="10" letter-spacing="0.4">
+      <text x="16" y="40">SYMBOL</text>
+      <text x="160" y="40">LOTS</text>
+      <text x="280" y="40">TYPE</text>
+      <text x="500" y="40">P&amp;L (EUR)</text>
+    </g>
+    <g fill="#e2e8f0" font-size="13">
+      <text x="16" y="74" font-weight="700">STOCK_A</text>
+      <text x="160" y="74" fill="#94a3b8">5 lots</text>
+      <rect x="280" y="60" width="56" height="20" rx="3" fill="#273449" stroke="#334155"/>
+      <text x="288" y="74" fill="#94a3b8" font-size="11" letter-spacing="0.3">TRADE</text>
+      <text x="500" y="74" fill="#4ade80" font-weight="700">+12,000.00</text>
+
+      <text x="16" y="106" font-weight="700">STOCK_B</text>
+      <text x="160" y="106" fill="#94a3b8">3 lots</text>
+      <rect x="280" y="92" width="56" height="20" rx="3" fill="#273449" stroke="#334155"/>
+      <text x="288" y="106" fill="#94a3b8" font-size="11" letter-spacing="0.3">TRADE</text>
+      <text x="500" y="106" fill="#4ade80" font-weight="700">+5,500.00</text>
+
+      <text x="16" y="138" font-weight="700">STOCK_C</text>
+      <text x="160" y="138" fill="#94a3b8">2 lots</text>
+      <rect x="280" y="124" width="56" height="20" rx="3" fill="#273449" stroke="#334155"/>
+      <text x="288" y="138" fill="#94a3b8" font-size="11" letter-spacing="0.3">TRADE</text>
+      <text x="500" y="138" fill="#4ade80" font-weight="700">+2,500.00</text>
+    </g>
+  </g>
+
+  <g transform="translate(660,508)">
+    <text x="20" y="14" fill="#94a3b8" font-size="11" letter-spacing="0.5" font-weight="600">ALL LOSSES BY SYMBOL</text>
+    <rect x="0" y="22" width="580" height="170" rx="8" fill="#1e293b" stroke="#334155"/>
+    <rect x="0" y="22" width="580" height="30" fill="#273449"/>
+    <g fill="#94a3b8" font-size="10" letter-spacing="0.4">
+      <text x="16" y="40">SYMBOL</text>
+      <text x="160" y="40">LOTS</text>
+      <text x="280" y="40">TYPE</text>
+      <text x="500" y="40">P&amp;L (EUR)</text>
+    </g>
+    <g fill="#e2e8f0" font-size="13">
+      <!-- Forced-close highlight -->
+      <rect x="0" y="60" width="580" height="32" fill="rgba(248,113,113,0.04)"/>
+      <line x1="0" y1="60" x2="0" y2="92" stroke="#f87171" stroke-width="3"/>
+      <text x="16" y="80" font-weight="700">STOCK_X</text>
+      <text x="160" y="80" fill="#94a3b8">12 lots</text>
+      <rect x="280" y="66" width="180" height="20" rx="3" fill="rgba(248,113,113,0.15)" stroke="rgba(248,113,113,0.4)"/>
+      <text x="288" y="80" fill="#f87171" font-size="11" letter-spacing="0.3">FORCED CLOSE (WRITE-OFF)</text>
+      <text x="500" y="80" fill="#f87171" font-weight="700">−3,500.00</text>
+
+      <text x="16" y="112" font-weight="700">STOCK_Y</text>
+      <text x="160" y="112" fill="#94a3b8">4 lots</text>
+      <rect x="280" y="98" width="56" height="20" rx="3" fill="#273449" stroke="#334155"/>
+      <text x="288" y="112" fill="#94a3b8" font-size="11" letter-spacing="0.3">TRADE</text>
+      <text x="500" y="112" fill="#f87171" font-weight="700">−1,000.00</text>
+
+      <text x="16" y="144" font-weight="700">STOCK_Z</text>
+      <text x="160" y="144" fill="#94a3b8">2 lots</text>
+      <rect x="280" y="130" width="56" height="20" rx="3" fill="#273449" stroke="#334155"/>
+      <text x="288" y="144" fill="#94a3b8" font-size="11" letter-spacing="0.3">TRADE</text>
+      <text x="500" y="144" fill="#f87171" font-weight="700">−500.00</text>
+    </g>
+  </g>
+
+  <!-- Footer summary -->
+  <rect x="40" y="708" width="1200" height="32" fill="rgba(248,113,113,0.08)" stroke="rgba(248,113,113,0.3)" stroke-width="0"/>
+  <line x1="40" y1="708" x2="1240" y2="708" stroke="rgba(248,113,113,0.3)"/>
+  <text x="60" y="728" fill="#e2e8f0" font-size="12">Loss split: trades <tspan fill="#f87171" font-weight="700">−1,500.00</tspan> (6) · forced closes <tspan fill="#f87171" font-weight="700">−3,500.00</tspan> (1 bankruptcy / delisting / merger)</text>
+
+  <rect x="40" y="740" width="1200" height="36" fill="#273449"/>
+  <text x="60" y="762" fill="#e2e8f0" font-size="12">Gains <tspan fill="#4ade80" font-weight="700">+20,000.00</tspan> offset by losses <tspan fill="#f87171" font-weight="700">−5,000.00</tspan> → net <tspan fill="#4ade80" font-weight="700">+15,000.00</tspan> minus exemption used <tspan font-weight="700">10,000.00</tspan> = taxable <tspan font-weight="700">5,000.00</tspan> (500.00 EUR tax @ 10%)</text>
+
+  <text x="640" y="816" fill="#94a3b8" font-size="11" text-anchor="middle">Aggregated per symbol across all FIFO-matched lots — see "Per-trade detail" tab for the lot-level view.</text>
+</svg>

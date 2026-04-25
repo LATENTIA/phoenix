@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Phoenix — {{ current_name|capitalize }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+</head>
+<body style="--accent-color: var(--{{ current_type }})">
+<div id="toasts" aria-live="polite"></div>
+
+<!-- Add-account modal -->
+<div id="add-account-overlay" class="overlay" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <h2>Add account</h2>
+    <p class="muted" style="margin:0 0 14px;font-size:.85rem">
+      Each account gets its own folder under <code>downloaded/</code> where you can drop
+      historical CSV statements. The <strong>type</strong> determines tax handling
+      (personal vs. business / ISOC).
+    </p>
+    <form id="add-account-form" onsubmit="submitAddAccount(event)">
+      <label class="field">
+        <span>Name <span class="muted">(used as folder name)</span></span>
+        <input name="name" required pattern="[a-z0-9_]+" placeholder="e.g. ib_personal" autocomplete="off"/>
+      </label>
+      <label class="field">
+        <span>Short code <span class="muted">(1–4 chars, used in CLI)</span></span>
+        <input name="code" required pattern="[A-Za-z0-9]{1,4}" maxlength="4" placeholder="e.g. P, P2, BIZ" autocomplete="off"/>
+      </label>
+      <label class="field">
+        <span>Type</span>
+        <select name="type" required>
+          <option value="">Choose…</option>
+          <option value="personal">Personal (no capital-gains tax)</option>
+          <option value="business">Business / ISOC</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>IBKR Flex token</span>
+        <input name="token" required placeholder="long numeric string from Client Portal" autocomplete="off"/>
+      </label>
+      <label class="field">
+        <span>YTD Flex Query ID</span>
+        <input name="query_id" required pattern="[0-9]+" placeholder="numeric ID from IBKR" autocomplete="off"/>
+      </label>
+      <div class="actions">
+        <button type="button" onclick="closeAddAccount()">Cancel</button>
+        <button type="submit" class="primary">Create account</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Empty-DB confirm dialog -->
+<div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true">
+  <div class="confirm-box">
+    <h2>⚠ Empty the database?</h2>
+    <p>
+      This wipes <strong>every</strong> trade, corporate action, transfer, open-position
+      snapshot and FX rate from <code>data.db</code>. The downloaded CSV/XML files in
+      <code>downloaded/</code> are <em>not</em> touched — you can re-ingest them by
+      clicking <strong>Load data</strong> afterwards.
+    </p>
+    <p class="muted" style="font-size:.8rem">Type <code>DELETE</code> to confirm:</p>
+    <input type="text" id="confirm-input" autocomplete="off"
+           style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
+                  border-radius:6px;padding:8px 10px;font:inherit;margin-bottom:12px"/>
+    <div class="actions">
+      <button onclick="closeConfirm()">Cancel</button>
+      <button class="danger" id="confirm-go" disabled onclick="doReset()">Yes, wipe it</button>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="topbar">
+    <div class="title">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="brand-mark"
+           width="36" height="46"/>
+      <h1>Phoenix</h1>
+      <span class="env-pill">{{ current_name }}</span>
+    </div>
+    <div class="env-switch">
+      {% for code, name in accounts.items() %}
+        {% set acc = accounts_full[code] %}
+        {% set t = acc.type %}
+        <span class="pill-wrap" style="--pill-color: var(--{{ t }})">
+          <a href="/?account={{ name }}"
+             class="pill {{ 'active' if name == current_name else '' }}"
+             title="{{ t }} account">
+            <span class="dot"></span>{{ name|capitalize }}
+          </a>
+          <button class="pill-close" onclick="confirmDeleteAccount({{ acc.id }}, '{{ name }}')"
+                  title="Delete this account">×</button>
+        </span>
+      {% endfor %}
+      <a href="#" onclick="openAddAccount();return false" title="Add new account"
+         style="color:var(--muted);padding:6px 12px;font-weight:600">＋</a>
+    </div>
+  </div>
+
+  {% set s = statuses[current_name] %}
+  <div class="card">
+    <div class="row">
+      <button class="primary" onclick="loadData('{{ current_code }}')">⚡ Load data</button>
+      <span class="muted" style="margin-left:8px">Download → ingest into DB → regenerate TOB &amp; P&amp;L</span>
+      <span style="flex:1"></span>
+      <button onclick="fetchMarks('{{ current_code }}')" title="Fetch 2025-12-31 closing prices from Yahoo for the Belgian CGT basis reset">📊 Refresh year-end marks</button>
+      <button class="danger" onclick="resetDb()">🗑 Empty DB</button>
+    </div>
+    <div class="meta">
+      Last ingest:
+      {% if s.last_ingest %}
+        <strong>{{ s.last_ingest.mtime }}</strong> · {{ s.last_ingest.path }}
+      {% else %}
+        <em>never</em> (DB is empty for this account)
+      {% endif %}
+      · Flex on disk: {% if s.xmls %}{{ s.xmls|length }} file(s){% else %}none{% endif %}
+    </div>
+    <div class="meta" id="db-status">
+      DB: trades <strong>{{ db_status.trades }}</strong> ·
+      CA <strong>{{ db_status.corporate_actions }}</strong> ·
+      xfer <strong>{{ db_status.transfers }}</strong> ·
+      OP snapshots <strong>{{ db_status.open_positions }}</strong> ·
+      FX <strong>{{ db_status.fx_rates }}</strong>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active{% if not s.has_data %} empty{% endif %}"
+            data-report="tob" onclick="showReport('tob')">TOB</button>
+    <button class="tab{% if not s.has_data %} empty{% endif %}"
+            data-report="pnl" onclick="showReport('pnl')">P&amp;L</button>
+    <button class="tab{% if not s.has_data %} empty{% endif %}"
+            data-report="performance" onclick="showReport('performance')">Performance</button>
+    <button class="tab{% if not s.has_data %} empty{% endif %}"
+            data-report="cgt" onclick="showReport('cgt')">CGT 2026+</button>
+  </div>
+
+  <div class="viewer" id="viewer">
+    <div class="placeholder">
+      Click <strong>TOB</strong>, <strong>P&amp;L</strong>, <strong>Performance</strong>, or
+      <strong>CGT 2026+</strong> above to view a report.
+      Click <code>⚡ Load data</code> first if nothing is generated yet.
+    </div>
+  </div>
+</div>
+
+<script>const CURRENT_ACCOUNT = "{{ current_name }}";</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

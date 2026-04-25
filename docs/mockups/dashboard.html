@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phoenix — Dashboard mockup</title>
+<style>
+:root {
+  --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
+  --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
+  --personal:#38bdf8; --business:#f59e0b;
+  --green:#4ade80; --red:#f87171; --orange:#fb923c;
+  --yellow:#facc15; --border:#334155;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+.container{max-width:1400px;margin:0 auto;padding:32px 24px 64px}
+h1{margin:0 0 8px;font-size:1.75rem}
+.muted{color:var(--muted);font-size:.85rem}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--panel-2);
+     color:var(--muted);font-size:.75rem;letter-spacing:.05em;margin-left:8px}
+.account-bar{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.account-bar a{color:var(--muted);padding:8px 16px;border-radius:6px;text-decoration:none;font-size:.9rem}
+.account-bar a.active{background:var(--panel);color:var(--text);font-weight:600}
+.account-bar a.personal.active{color:var(--personal)}
+.account-bar a.add{margin-left:auto;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+.row{display:flex;align-items:center;gap:8px}
+button{background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font:inherit;font-size:.85rem;cursor:pointer}
+button.primary{background:var(--accent);color:#0f172a;border-color:var(--accent);font-weight:600}
+button.danger{background:transparent;color:var(--red);border-color:var(--red)}
+.meta{margin-top:8px;color:var(--muted);font-size:.85rem}
+.tabs{display:flex;gap:4px;margin:16px 0 0;border-bottom:1px solid var(--border)}
+.tab{background:transparent;border:none;color:var(--muted);padding:10px 18px;font:inherit;font-size:.9rem;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.viewer{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:24px;min-height:400px;margin-top:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:16px}
+.kpi{background:var(--panel-2);padding:16px;border-radius:8px;border:1px solid var(--border)}
+.kpi .label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+.kpi .value{font-size:1.4rem;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.value.pos{color:var(--green)} .value.neg{color:var(--red)} .value.muted{color:var(--muted)}
+.preview-table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
+.preview-table th{background:var(--panel-2);color:var(--muted);text-align:left;padding:8px 12px;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+.preview-table td{padding:6px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.num{text-align:right} .pos{color:var(--green)} .neg{color:var(--red)}
+.mockup-banner{background:rgba(250,204,21,.1);border:1px dashed var(--yellow);color:var(--yellow);text-align:center;padding:8px;font-size:.82rem;border-radius:6px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="mockup-banner">📄 Illustrative mockup — all numbers, tickers and dates are fictional examples</div>
+  <h1>📈 Phoenix <span class="tag">your IBKR tax & P&amp;L companion</span></h1>
+  <div class="muted">A local web dashboard for Belgian traders using Interactive Brokers — runs on your machine, no data leaves it.</div>
+
+  <div class="account-bar">
+    <a href="#" class="personal active">👤 personal</a>
+    <a href="#">🏢 business</a>
+    <a href="#" class="add">＋ Add account</a>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary">⚡ Load data</button>
+      <span class="muted" style="margin-left:8px">Download → ingest into DB → regenerate TOB &amp; P&amp;L</span>
+      <span style="flex:1"></span>
+      <button title="Refresh year-end marks from Yahoo">📊 Refresh year-end marks</button>
+      <button class="danger">🗑 Empty DB</button>
+    </div>
+    <div class="meta">
+      Last ingest: <strong>example_statement.xml</strong> · 2 minutes ago<br>
+      DB: trades <strong>500</strong> · CA <strong>20</strong> · xfer <strong>10</strong> · OP snapshots <strong>120</strong> · FX <strong>7,000</strong>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab">TOB</button>
+    <button class="tab">P&amp;L</button>
+    <button class="tab">Performance</button>
+    <button class="tab active">CGT 2026+</button>
+  </div>
+
+  <div class="viewer">
+    <h2 style="margin:0 0 12px">Belgian Capital Gains Tax — example <span class="tag">FIFO</span> <span class="tag">10% from 2026-01-01</span></h2>
+
+    <div class="cards">
+      <div class="kpi"><div class="label">Total taxable years</div><div class="value">1</div></div>
+      <div class="kpi"><div class="label">Total net (EUR, all yrs)</div><div class="value pos">+15,000.00</div></div>
+      <div class="kpi"><div class="label">Total exemption used (EUR)</div><div class="value">10,000.00</div></div>
+      <div class="kpi"><div class="label">Total taxable (EUR)</div><div class="value">5,000.00</div></div>
+      <div class="kpi"><div class="label">Total tax due (EUR)</div><div class="value neg">500.00</div></div>
+      <div class="kpi"><div class="label">Carry-forward bank (EUR)</div><div class="value">0.00</div></div>
+    </div>
+
+    <h3 style="margin:16px 0 8px;font-size:.95rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Per-year tax computation</h3>
+    <table class="preview-table">
+      <thead><tr><th>Year</th><th class="num">Gains</th><th class="num">Losses</th><th class="num">Net</th><th class="num">Carry in</th><th class="num">Exemption used</th><th class="num">Carry out</th><th class="num">Taxable</th><th class="num">Tax @ 10%</th></tr></thead>
+      <tbody>
+        <tr><td>2026</td><td class="num pos">+20,000.00</td><td class="num neg">−5,000.00</td><td class="num pos"><strong>+15,000.00</strong></td><td class="num muted">0.00</td><td class="num">10,000.00</td><td class="num muted">0.00</td><td class="num">5,000.00</td><td class="num neg"><strong>500.00</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="muted" style="margin-top:12px;font-size:.82rem">
+      Net gain after losses cancel out → exemption applied → 10% on the remainder. The whole calculation is shown here so an accountant can verify each step.
+    </div>
+  </div>
+</div>
+</body>
+</html>

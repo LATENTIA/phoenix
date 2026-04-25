@@ -1,0 +1,38 @@
+# ---------- Sensitive — NEVER commit ----------
+# IBKR Flex tokens are stored in data.db. Trade history is highly personal.
+data.db
+data.db-journal
+data.db-wal
+data.db-shm
+
+# Raw IBKR exports (XML / CSV statements)
+downloaded/
+
+# Logs may contain tokens passed via subprocess args
+logs/
+
+# ---------- Editor / runtime artifacts ----------
+.claude/
+__pycache__/
+*.pyo
+*.swp
+*~
+*.tmp.*
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.venv/
+
+# ---------- Python bytecode ----------
+*.pyc
+
+# ---------- Local backups ----------
+*.bak
+
+# ---------- P&L recovery artifacts (kept locally for audit, not in git) ----------
+# After the 2026-04-25 truncation incident, `reports/pnl.py` was rebuilt from scratch
+# and verified output-identical to these artifacts. They live on disk as a personal
+# audit trail but should not ship in the repo.
+reports/_pnl_legacy.pyc
+reports/_pnl_decompiled_reference.txt
