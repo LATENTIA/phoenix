@@ -89,9 +89,29 @@ def _load_local_cache(path: Path = LOCAL_CACHE_PATH) -> Dict[str, float]:
     return rates
 
 
-def refresh_from_ecb(path: Path = LOCAL_CACHE_PATH) -> int:
-    """Force-download the latest ECB archive and overwrite the local cache."""
-    print(f"[ecb] refreshing rates from ECB...")
+def refresh_from_ecb(
+    path: Path = LOCAL_CACHE_PATH,
+    *,
+    force: bool = False,
+    max_age_hours: float = 12.0,
+) -> int:
+    """Refresh the local ECB rate cache. Skips the HTTP fetch entirely if the
+    cache file was modified less than `max_age_hours` ago — the ECB only
+    publishes a new rate ~once per business day, so refreshing more often is
+    pure waste. Pass `force=True` to bypass the freshness gate.
+
+    Returns the number of rates now in the cache (download path) or 0 when
+    the gate skipped the fetch.
+    """
+    if not force and path.exists():
+        import time as _time
+        age_hours = (_time.time() - path.stat().st_mtime) / 3600.0
+        if age_hours < max_age_hours:
+            print(f"[ecb] cache is {age_hours:.1f}h old "
+                  f"(< {max_age_hours:.0f}h threshold) — skipping refresh")
+            return 0
+
+    print("[ecb] refreshing rates from ECB...")
     rates = _download_ecb_history()
     _save_local_cache(rates, path)
     _load_ecb_history.cache_clear()  # invalidate in-process cache

@@ -29,8 +29,6 @@ IBKR activity will never trigger; if the user needs them, they should
 consult their accountant.
 """
 
-from __future__ import annotations
-
 import argparse
 import html
 import sys
@@ -99,7 +97,7 @@ def annotate_tax_basis(
     tax_realized = []
     mark_status = []
 
-    for _, row in df.iterrows():
+    for row in df.to_dict("records"):
         if not row["is_taxable_year"]:
             tax_basis_source.append("n/a (exempt)")
             tax_basis_eur.append(None)
@@ -334,9 +332,9 @@ def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
     conn.close()
 
     # Surface auto-detected ticker changes (Chapter-11 renames, CUSIP/ISIN
-    # swaps IBKR forgot to flag as a CA, etc.). The matcher will use them
-    # automatically; we also pass them to the renderer so the user/accountant
-    # can audit each one.
+    # swaps IBKR forgot to flag as a CA, etc.) — compute once and pass into
+    # `match_lots` so it doesn't re-detect on its own. We need them out here
+    # too so the report's "Detected renames" tab can list them with rationale.
     auto_changes = _pnl._detect_symbol_changes(
         snaps, df, ca_actions, transfers=transfers,
     )
@@ -344,6 +342,7 @@ def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
     closed, open_df = _pnl.match_lots(
         df, ca_actions=ca_actions, transfers=transfers,
         reconcile_snapshots=snaps, method=method,
+        auto_changes=auto_changes,
     )
 
     tax_trades = annotate_tax_basis(closed, ye_marks, fx_2025_12_31)
@@ -452,7 +451,7 @@ def _format_symbol_aggregate_rows(df: pd.DataFrame, *, sign: str) -> str:
     if sign == "pos":
         df = df.sort_values("total_eur", ascending=False)
     rows = []
-    for _, t in df.iterrows():
+    for t in df.to_dict("records"):
         type_html = _close_type_html(str(t["dominant_type"]))
         if str(t["dominant_type"]) == "mixed":
             type_html = '<span class="basis-tag tag-yahoo">mixed</span>'
@@ -477,7 +476,7 @@ def _render_per_trade_rows(tax_trades: pd.DataFrame) -> str:
 
     taxable = taxable.sort_values(["sell_date", "symbol"])
     rows = []
-    for _, t in taxable.iterrows():
+    for t in taxable.to_dict("records"):
         v = t.get("tax_realized_eur")
         cls = "pos" if (v or 0) >= 0 else "neg"
         close_type = str(t.get("close_type") or "trade")

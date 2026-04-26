@@ -24,6 +24,7 @@ kept beside as a historical audit trail).
 
 import argparse
 import html
+import logging
 import re
 import sys
 from collections import defaultdict
@@ -31,6 +32,11 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+
+# Logger for matcher diagnostics (warnings, symbol-change detections,
+# reconcile messages). The Flask layer captures these into `logs/app.log`;
+# CLI users see them on stderr via the root logger's StreamHandler.
+log = logging.getLogger("phoenix.match")
 
 from core import db as _db
 from core.ecb_fx_parser import get_eur_usd_rate_for_day
@@ -49,18 +55,28 @@ PARSED_DIR = Path("parsed")
 # ---------- Trade dedup ----------
 
 def dedupe(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse duplicate trades that may appear in both XML and CSV sources."""
+    """Collapse duplicate trades that may appear in both XML and CSV sources.
+
+    Uses tradeID when present, otherwise falls back to the
+    (tradeDate, symbol, quantity, tradePrice) tuple. Sorting by source first
+    keeps the canonical-source row when duplicates collide.
+    """
     if df.empty:
         return df
+    df = df.sort_values("source", kind="stable")
     id_key = df["tradeID"].fillna("").astype(str)
-    fallback_key = (
-        df["tradeDate"].fillna("").astype(str)
-        + "|" + df["symbol"].fillna("").astype(str)
-        + "|" + df["quantity"].astype(str)
-        + "|" + df["tradePrice"].astype(str)
-    )
-    df = df.assign(_dedup_key=id_key.where(id_key != "", fallback_key))
-    df = df.sort_values("source").drop_duplicates(subset="_dedup_key", keep="first")
+    # Tuple-keyed fallback: avoids per-row string concatenation. The objects
+    # produced are hashable (Python tuples), which is all drop_duplicates needs.
+    fallback_key = list(zip(
+        df["tradeDate"].fillna(""),
+        df["symbol"].fillna(""),
+        df["quantity"],
+        df["tradePrice"],
+    ))
+    df = df.assign(_dedup_key=[
+        i if i else fb for i, fb in zip(id_key, fallback_key)
+    ])
+    df = df.drop_duplicates(subset="_dedup_key", keep="first")
     return df.drop(columns="_dedup_key").reset_index(drop=True)
 
 
@@ -200,7 +216,7 @@ def _apply_transfer(event: dict, open_lots: dict[str, list[dict]], fx_cache: dic
             if lot["qty_remaining"] <= 1e-9:
                 open_lots[symbol].pop(0)
         if remaining > 1e-9:
-            print(f"[warn] Transfer OUT {symbol} on {date}: {remaining:g} shares beyond open position")
+            log.warning(f"transfer OUT {symbol} on {date}: {remaining:g} shares beyond open position")
 
 
 def _apply_stock_merger(event: dict, open_lots: dict[str, list[dict]]) -> None:
@@ -280,7 +296,7 @@ def _group_ca_actions(ca_df: pd.DataFrame) -> list[dict]:
                                 "qty_removed": abs(neg[symbol]),
                                 "proceeds_usd": total_proceeds, "desc": desc})
         else:
-            print(f"[ca] unhandled action type on {date}: {desc[:80]}")
+            log.warning(f"unhandled corporate-action type on {date}: {desc[:80]}")
     return actions
 
 
@@ -289,7 +305,7 @@ def _snapshot_to_dict(snap_df: pd.DataFrame) -> dict[str, float]:
     if snap_df is None or snap_df.empty:
         return {}
     out: dict[str, float] = {}
-    for _, r in snap_df.iterrows():
+    for r in snap_df.to_dict("records"):
         sym = r.get("symbol")
         if not sym or re.fullmatch(r"[A-Z]{3}\.[A-Z]{3}", str(sym)):
             continue
@@ -332,6 +348,29 @@ def _detect_symbol_changes(
     trades_df = trades_df.copy()
     trades_df["tradeDate"] = trades_df["tradeDate"].fillna("")
 
+    # Pre-bucket transfers and CAs by date so each window scan is O(window),
+    # not O(all-history). The previous code re-walked all transfers and CAs
+    # for every snapshot pair, which is O(snaps × ca + snaps × transfers).
+    transfers_by_date: dict[str, list[dict]] = defaultdict(list)
+    for xf in transfers:
+        d = xf.get("date")
+        if d:
+            transfers_by_date[d].append(xf)
+    ca_by_date: dict[str, list[dict]] = defaultdict(list)
+    for ca in ca_actions:
+        d = ca.get("date")
+        if d:
+            ca_by_date[d].append(ca)
+    sorted_transfer_dates = sorted(transfers_by_date)
+    sorted_ca_dates = sorted(ca_by_date)
+
+    def _dates_in(sorted_keys: list[str], lo: str, hi: str) -> list[str]:
+        """Return keys k where lo < k <= hi using bisect."""
+        import bisect
+        i = bisect.bisect_right(sorted_keys, lo)
+        j = bisect.bisect_right(sorted_keys, hi)
+        return sorted_keys[i:j]
+
     detected: list[dict] = []
     prev_date, prev_snap = snaps[0]
     prev_qty = _snapshot_to_dict(prev_snap)
@@ -349,40 +388,36 @@ def _detect_symbol_changes(
 
         # Net transfer qty in the same window (IN = +, OUT = -).
         net_transfer: dict[str, float] = defaultdict(float)
-        for xf in transfers:
-            d = xf.get("date")
-            if not d or not (prev_date < d <= curr_date):
-                continue
-            sym = xf.get("symbol")
-            qty = float(xf.get("quantity") or 0)
-            direction = (xf.get("direction") or "").upper()
-            if not sym or qty <= 0:
-                continue
-            net_transfer[sym] += qty if direction == "IN" else -qty
+        for d in _dates_in(sorted_transfer_dates, prev_date, curr_date):
+            for xf in transfers_by_date[d]:
+                sym = xf.get("symbol")
+                qty = float(xf.get("quantity") or 0)
+                direction = (xf.get("direction") or "").upper()
+                if not sym or qty <= 0:
+                    continue
+                net_transfer[sym] += qty if direction == "IN" else -qty
 
         # Net CA qty effects in the same window.
         net_ca: dict[str, float] = defaultdict(float)
-        for ca in ca_actions:
-            d = ca.get("date")
-            if not d or not (prev_date < d <= curr_date):
-                continue
-            t = ca.get("type")
-            if t in ("delist", "cash_merger"):
-                sym = ca.get("symbol")
-                if sym:
-                    net_ca[sym] -= float(ca.get("qty_removed") or 0)
-            elif t == "stock_merger":
-                old, new = ca.get("old_symbol"), ca.get("new_symbol")
-                if old:
-                    net_ca[old] -= float(ca.get("old_qty") or 0)
-                if new:
-                    net_ca[new] += float(ca.get("new_qty") or 0)
-            elif t == "split":
-                # Split rescales qty in place (e.g. 1-for-25 reverse: 1500 → 60).
-                # The qty_change captures the snapshot-visible delta.
-                sym = ca.get("symbol")
-                if sym:
-                    net_ca[sym] += float(ca.get("qty_change") or 0)
+        for d in _dates_in(sorted_ca_dates, prev_date, curr_date):
+            for ca in ca_by_date[d]:
+                t = ca.get("type")
+                if t in ("delist", "cash_merger"):
+                    sym = ca.get("symbol")
+                    if sym:
+                        net_ca[sym] -= float(ca.get("qty_removed") or 0)
+                elif t == "stock_merger":
+                    old, new = ca.get("old_symbol"), ca.get("new_symbol")
+                    if old:
+                        net_ca[old] -= float(ca.get("old_qty") or 0)
+                    if new:
+                        net_ca[new] += float(ca.get("new_qty") or 0)
+                elif t == "split":
+                    # Split rescales qty in place (e.g. 1-for-25 reverse: 1500 → 60).
+                    # The qty_change captures the snapshot-visible delta.
+                    sym = ca.get("symbol")
+                    if sym:
+                        net_ca[sym] += float(ca.get("qty_change") or 0)
 
         all_syms = (set(prev_qty) | set(curr_qty)
                     | set(net_trade) | set(net_ca) | set(net_transfer))
@@ -455,12 +490,17 @@ def match_lots(
     transfers: list[dict] | None = None,
     reconcile_snapshots: list[tuple[str, pd.DataFrame]] | None = None,
     method: str = "FIFO",
+    auto_changes: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Walk trades + corporate actions + transfers chronologically per symbol, matching
     sells to open lots. After processing, optionally reconcile against IBKR's reported
     open positions (force-closing any phantom-open lots at $0 on the snapshot date).
     Returns (closed_df, open_df).
+
+    If `auto_changes` is supplied, the symbol-change detector is *not* re-run —
+    callers that already invoked `_detect_symbol_changes()` (e.g. to surface
+    detections in the report UI) can pass the result here to avoid duplicate work.
     """
     method = method.upper()
     if method not in ("FIFO", "LIFO"):
@@ -476,20 +516,23 @@ def match_lots(
     # flag as a CA, etc.) by reconciling consecutive snapshots against the
     # trades/CAs/transfers in between. These become extra stock_merger events
     # so the basis rolls forward instead of being written off.
-    auto_changes = _detect_symbol_changes(
-        reconcile_snapshots, df, ca_actions, transfers=transfers,
-    )
+    if auto_changes is None:
+        auto_changes = _detect_symbol_changes(
+            reconcile_snapshots, df, ca_actions, transfers=transfers,
+        )
     for ch in auto_changes:
-        print(f"[symbol-change] {ch['date']}: {ch['old_symbol']} → {ch['new_symbol']} "
-              f"(qty {ch['old_qty']:g}; basis rolled forward, no taxable event)")
+        log.info(f"symbol-change {ch['date']}: {ch['old_symbol']} -> {ch['new_symbol']} "
+                 f"(qty {ch['old_qty']:g}; basis rolled forward, no taxable event)")
 
     # Unified event stream: trades (kind=0, earliest), transfers (kind=1, mid-day),
     # CAs and reconcile (kind=2, end-of-day). Auto-detected symbol changes share the
     # mid-day priority slot so they fire BEFORE reconcile on the same date.
     events: list[tuple[str, int, dict]] = []
-    for _, row in df.iterrows():
+    # to_dict("records") is ~10x faster than iterrows() for building Python-native
+    # event dicts; we don't need pandas' Series machinery here.
+    for row in df.to_dict("records"):
         key = (row.get("dateTime") or row.get("tradeDate") or "", 0)
-        events.append((*key, {"kind": "trade", **row.to_dict()}))
+        events.append((*key, {"kind": "trade", **row}))
     for act in ca_actions:
         key = ((act["date"] or "") + " 23:59:59", 1)
         events.append((*key, {"kind": act["type"], **act}))
@@ -615,8 +658,8 @@ def match_lots(
                 open_lots[symbol].pop(idx)
 
         if sell_qty_remaining > 0:
-            print(f"[warn] {symbol} on {trade_date}: sold {sell_qty_remaining:g} "
-                  f"shares beyond any open lot (short sale or missing prior history)")
+            log.warning(f"{symbol} on {trade_date}: sold {sell_qty_remaining:g} "
+                        f"shares beyond any open lot (short sale or missing prior history)")
 
     # Flatten remaining open lots for the output DataFrame
     open_rows = []
@@ -657,7 +700,7 @@ def _apply_reconcile(open_lots: dict[str, list[dict]], closed: list[dict],
     if snapshot is None or snapshot.empty or not reconcile_date:
         return
     ibkr_qty: dict[str, float] = {}
-    for _, r in snapshot.iterrows():
+    for r in snapshot.to_dict("records"):
         sym = r.get("symbol")
         qty = r.get("quantity")
         if sym and qty is not None:
@@ -675,13 +718,13 @@ def _apply_reconcile(open_lots: dict[str, list[dict]], closed: list[dict],
             continue
         if their_qty > 1e-6:
             if abs(our_qty - their_qty) > 1e-6:
-                print(f"[reconcile] {symbol}: we have {our_qty:g}, IBKR has {their_qty:g} "
-                      f"(likely missing trades — left OPEN, please verify)")
+                log.warning(f"reconcile {symbol}: we have {our_qty:g}, IBKR has {their_qty:g} "
+                            f"(likely missing trades - left OPEN, please verify)")
             continue
 
         # IBKR reports zero — write off all our lots at $0 on reconcile_date.
-        print(f"[reconcile] {symbol}: IBKR reports 0, writing off {our_qty:g} shares "
-              f"at $0 (bankruptcy/delisting) on {reconcile_date}")
+        log.info(f"reconcile {symbol}: IBKR reports 0, writing off {our_qty:g} shares "
+                 f"at $0 (bankruptcy/delisting) on {reconcile_date}")
         excess = our_qty
         while excess > 1e-9 and open_lots[symbol]:
             idx = 0 if method == "FIFO" else -1
@@ -1038,7 +1081,7 @@ def _render_fx_decomp_rows(df: pd.DataFrame) -> str:
     if df is None or df.empty:
         return "<tr><td colspan='5' class='muted'>No closed trades.</td></tr>"
     rows = []
-    for _, r in df.iterrows():
+    for r in df.to_dict("records"):
         total = float(r["total_eur"])
         price = float(r["price_eur"])
         fx = float(r["fx_eur"])
@@ -1086,7 +1129,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
 
     # Annual table rows
     annual_rows_html = []
-    for _, y in annual.iterrows():
+    for y in annual.to_dict("records"):
         pnl_eur = y["realized_pnl_eur"]
         cls = "pos" if (pnl_eur or 0) >= 0 else "neg"
         annual_rows_html.append(
@@ -1105,7 +1148,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
     # Closed trades — full detail
     closed_rows_html = []
     cs = closed.sort_values(["sell_date", "symbol"]) if not closed.empty else closed
-    for _, t in cs.iterrows():
+    for t in cs.to_dict("records"):
         v = t.get("realized_pnl_eur")
         cls = "pos" if (v or 0) >= 0 else "neg"
         closed_rows_html.append(
@@ -1127,7 +1170,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
 
     # Open positions
     open_rows_html = []
-    for _, t in open_df.iterrows():
+    for t in open_df.to_dict("records"):
         filled = t["qty_original"] - t["qty_remaining"]
         status = "OPEN" if filled == 0 else "PARTIAL"
         status_cls = "open" if filled == 0 else "partial"
@@ -1150,7 +1193,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
     all_rows = []
     if not all_trades.empty:
         at = all_trades.sort_values(["tradeDate", "symbol"], kind="stable")
-        for _, t in at.iterrows():
+        for t in at.to_dict("records"):
             qty = t.get("quantity") or 0
             side = "BUY" if qty > 0 else ("SELL" if qty < 0 else "")
             side_cls = "buy" if side == "BUY" else ("sell" if side == "SELL" else "")
@@ -1265,7 +1308,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
 
         def render_symbol_rows(df_sym):
             rows = []
-            for _, r in df_sym.iterrows():
+            for r in df_sym.to_dict("records"):
                 v = r["pnl_eur"]
                 clsn = "pos" if v >= 0 else "neg"
                 rows.append(
@@ -1298,7 +1341,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
             pnl_eur=("pnl_eur", "sum"),
         ).reset_index().sort_values("pnl_eur", ascending=False)
         cat_rows = []
-        for _, r in by_cat.iterrows():
+        for r in by_cat.to_dict("records"):
             v = r["pnl_eur"]
             clsn = "pos" if v >= 0 else "neg"
             cat_rows.append(
@@ -1318,7 +1361,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
             f"<tr><td>{html.escape(str(r['close_type']))}</td>"
             f"<td class='num'>{int(r['trades'])}</td>"
             f"<td class='num'>{fmt_num(r['pnl_eur'])}</td></tr>"
-            for _, r in by_close.iterrows()
+            for r in by_close.to_dict("records")
         )
 
         # Holding-period buckets
@@ -1344,7 +1387,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
             pnl_eur=("pnl_eur", "sum"),
         ).reindex(order).dropna().reset_index()
         hold_rows = []
-        for _, r in by_hold.iterrows():
+        for r in by_hold.to_dict("records"):
             v = r["pnl_eur"]
             clsn = "pos" if v >= 0 else "neg"
             hold_rows.append(
@@ -1370,7 +1413,7 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
     holdings = _holdings_summary(open_df, ibkr_positions)
     has_ibkr = ibkr_positions is not None and not ibkr_positions.empty
     holdings_rows = []
-    for _, h in holdings.iterrows():
+    for h in holdings.to_dict("records"):
         diff = h.get("diff")
         ibkr_qty = h.get("ibkr_qty")
         if pd.isna(ibkr_qty):

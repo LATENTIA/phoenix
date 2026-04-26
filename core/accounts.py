@@ -2,13 +2,11 @@
 Account-related helpers used by the Flask app.
 
 Single source of truth: the `accounts` table in `data.db`.
-On first run, seeds default `personal`/`business` rows from `ibkr_flex.ACCOUNTS`.
-On every call, backfills any missing `flex_token` from the corresponding env var
-(IBKR_FLEX_TOKEN / IBKR_FLEX_TOKEN_BUSINESS) so the DB remains the single source.
+On first run, seeds default `personal`/`business` rows so the dashboard has
+something to render; the user adds their own token + query ID via the UI.
 """
 
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -22,42 +20,23 @@ def get_accounts() -> dict[str, dict]:
     """
     Return {code: account_dict} from the DB.
 
-    Side effects:
-      - Creates seeded rows on first run (when DB is empty).
-      - Migrates env-var tokens into the DB on every call (one-shot per account).
+    Side effect: on a fresh install (no rows in `accounts` yet) we seed two
+    empty placeholder rows — `personal` (P) and `business` (B) — so the
+    dashboard renders something. The user fills in token + query ID via
+    the "Add account" UI; nothing else is auto-populated.
     """
     conn = db.connect()
     db.init_schema(conn)
     rows = db.list_accounts(conn)
-    try:
-        import ibkr_flex
-    except Exception:
-        ibkr_flex = None
 
-    if not rows and ibkr_flex is not None:
+    if not rows:
         for code, name in [("P", "personal"), ("B", "business")]:
-            cfg = ibkr_flex.ACCOUNTS.get(name, {})
             db.create_account(
                 conn, name=name, code=code, type=name,
-                flex_token=None,
-                queries=cfg.get("queries", {}),
+                flex_token=None, queries={},
             )
         log.info("seeded default accounts (personal, business)")
         rows = db.list_accounts(conn)
-
-    if ibkr_flex is not None:
-        migrated = 0
-        for r in rows:
-            if r.get("flex_token"):
-                continue
-            cfg = ibkr_flex.ACCOUNTS.get(r["name"], {})
-            env_var = cfg.get("token_env")
-            if env_var and os.environ.get(env_var):
-                db.update_account(conn, r["id"], flex_token=os.environ[env_var])
-                migrated += 1
-                log.info(f"migrated token for account '{r['name']}' from env var {env_var}")
-        if migrated:
-            rows = db.list_accounts(conn)
 
     conn.close()
     return {r["code"]: r for r in rows}
@@ -82,20 +61,20 @@ def report_status(account_name: str, *, downloaded_dir: Path) -> dict:
 
     conn = db.connect()
     db.init_schema(conn)
-    counts = {
-        "trades": conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE account_code = ?", (code,)
-        ).fetchone()[0],
-        "ca": conn.execute(
-            "SELECT COUNT(*) FROM corporate_actions WHERE account_code = ?", (code,)
-        ).fetchone()[0],
-        "transfers": conn.execute(
-            "SELECT COUNT(*) FROM transfers WHERE account_code = ?", (code,)
-        ).fetchone()[0],
-        "open_positions": conn.execute(
-            "SELECT COUNT(*) FROM open_positions_snapshots WHERE account_code = ?", (code,)
-        ).fetchone()[0],
-    }
+    # One query, four counts via a UNION-of-counts pattern. Keyed by an alias
+    # so we can dict-lookup the result; fewer round-trips than four separate
+    # COUNT(*) queries.
+    rows = conn.execute(
+        """SELECT 'trades' AS k, COUNT(*) AS n FROM trades             WHERE account_code = ?
+        UNION ALL
+           SELECT 'ca',          COUNT(*)      FROM corporate_actions  WHERE account_code = ?
+        UNION ALL
+           SELECT 'transfers',   COUNT(*)      FROM transfers          WHERE account_code = ?
+        UNION ALL
+           SELECT 'open_positions', COUNT(*)   FROM open_positions_snapshots WHERE account_code = ?""",
+        (code, code, code, code),
+    ).fetchall()
+    counts = {r["k"]: r["n"] for r in rows}
     last_ingest_row = conn.execute(
         "SELECT path, ingested_at FROM source_files WHERE account_code = ? "
         "ORDER BY ingested_at DESC LIMIT 1", (code,),

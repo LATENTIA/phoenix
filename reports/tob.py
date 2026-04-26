@@ -144,7 +144,7 @@ def load_rate_overrides(account: str) -> dict[str, float]:
         if not dt_col:
             continue
         rate_col = next((c for c in df.columns if c.lower() == "rate"), None)
-        for _, row in df.iterrows():
+        for row in df.to_dict("records"):
             dt_raw = str(row[dt_col]).split(",")[0].strip()
             try:
                 dt = datetime.strptime(dt_raw, "%Y-%m-%d").date().isoformat()
@@ -232,7 +232,7 @@ def add_eur_and_tob(trades_df: pd.DataFrame) -> pd.DataFrame:
 def _build_table_rows(display_df: pd.DataFrame) -> str:
     """Build <tbody> rows manually so we can inject checkbox + data attributes."""
     rows_html = []
-    for _, row in display_df.iterrows():
+    for row in display_df.to_dict("records"):
         total_eur = row.get('Total_EUR')
         tob = row.get('TOB')
         trade_date = row.get('TradeDate') or ''

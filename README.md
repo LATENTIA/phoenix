@@ -3,10 +3,14 @@
 <img src="docs/logo-tile.svg" alt="" align="left" width="100" hspace="24" vspace="4">
 
 **Your IBKR tax & P&L companion — built for Belgian traders.**
+&nbsp;`v0.1.0-beta`
 
 A local web dashboard that turns your Interactive Brokers statements into the tax reports your accountant actually needs: the new **Belgian capital gains tax** (10% from 2026), the existing **TOB** transaction tax (0.35%), and a multi-year **P&L analysis** that finally tells you the truth about your trading.
 
 > 🔒 **Runs entirely on your machine.** Your trade history never leaves your computer.
+
+> 🧪 **First public beta.** Core features (TOB, P&L, CGT 2026+, multi-account) work end-to-end and are
+> output-verified. Some polish and longer-term features are still being built — see [Future work](#-future-work) below.
 
 <br clear="all">
 
@@ -155,16 +159,38 @@ Reports regenerate automatically.
 
 ---
 
-## 🛣️ Roadmap
+## 🛣️ Future work
 
-The CGT 2026+ implementation is feature-complete for a typical retail trader. Things that may come next, in
-order of likelihood:
+The `v0.1.0-beta` covers what a typical Belgian retail trader needs *today*. Items below are queued for
+upcoming versions, roughly in the order they're likely to ship:
 
-- Manual override mechanism for auto-detected renames (in case a heuristic misfires)
-- Year-end mark editor in the UI (for delisted tickers Yahoo doesn't carry)
-- Export to a Belgian-tax-form-friendly CSV
-- The two CGT special regimes (33% on internal capital gains; substantial-shareholding scheme)
-  — currently out of scope; they don't apply to typical retail IBKR activity
+### Near-term
+- 📂 **Data-sources panel** — show every loaded XML / manually-added CSV with its covered year range,
+  ingest timestamp, and row counts. Lets you see at a glance which years are populated and which need
+  a historical CSV drop.
+- 🖼️ **Add-account mockup** — visual walk-through of the "Add account" flow (token, query ID, type)
+  for first-time users.
+- 🖨️ **Print extract for the accountant** — a single-page printable PDF/HTML view per report,
+  formatted for hand-off (no interactive elements, A4-friendly, designed to staple to a tax filing).
+- 🔧 Manual override for auto-detected renames (in case the heuristic misfires).
+- ✏️ Year-end mark editor in the UI (for delisted tickers Yahoo doesn't carry).
+
+### Medium-term
+- 📅 **Dynamic CGT years** — the current calculator hard-codes `2025-12-31` (basis-reset date) and
+  `2026-01-01` (regime start). When 2027/2028/etc. roll around, the report should automatically extend
+  the per-year breakdown without code changes. Reset-date and exemption-bank state need to be
+  parameterised by year.
+- 🏢 **Business / corporate tax** — accounts marked `business` currently use the same retail CGT
+  pipeline. Belgian corporate tax (ISOC) has different rules: capital gains as ordinary income at
+  the corporate rate, separate deduction regime, etc. Needs a parallel report mode.
+- 🇧🇪 Export to a Belgian tax-form-friendly CSV (with the field names the form expects).
+
+### Out of scope (for now)
+- The two CGT special regimes — 33 % on **internal capital gains** (sale to a controlled company) and
+  the progressive 0 % / 1.25 % / 2.5 % / 5 % / 10 % scheme for **substantial shareholdings (≥20 %)**.
+  These don't apply to typical retail IBKR activity; if you need them, your accountant has tools.
+- Live (unrealised) P&L. Phoenix is realised-only because that's what the tax forms ask for. A live
+  P&L would need a market-data feed (paid) and is intentionally out of scope.
 
 ---
 
