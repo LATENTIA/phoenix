@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Phoenix · Methodology</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
+<style>{{ css | safe }}</style>
+<style>
+  /* Page-specific tweaks on top of the shared dividends styling */
+  .methodology h2{margin:28px 0 8px;font-size:1.2rem;color:var(--accent)}
+  .methodology h3{margin:20px 0 6px;font-size:1.02rem}
+  .methodology .section{background:var(--panel);border:1px solid var(--border);
+                        border-radius:10px;padding:18px 22px;margin:16px 0}
+  .methodology code.path{background:var(--panel-2);padding:1px 6px;border-radius:4px;
+                         font-size:.86rem;color:var(--text)}
+  .toc{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;
+       padding:14px 22px;margin:16px 0;font-size:.92rem;column-count:2;column-gap:24px}
+  .toc a{color:var(--accent);text-decoration:none;display:block;padding:2px 0}
+  .toc a:hover{text-decoration:underline}
+  .pill-row{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .pill-row code{background:var(--panel-2);padding:2px 8px;border-radius:4px;
+                 font-size:.78rem;color:var(--accent);border:1px solid var(--border)}
+  .formula{background:var(--panel-2);padding:10px 14px;border-radius:6px;
+           font-family:Consolas,Menlo,monospace;font-size:.86rem;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="container methodology">
+  <h1>Methodology</h1>
+  <div class="muted">
+    A complete description of how Phoenix processes every IBKR statement and
+    arrives at the numbers shown in each report. Last updated {{ now }}.
+  </div>
+
+  <div class="info-box">
+    Phoenix is an audit-trail tool, not a tax-advice tool. Every figure is
+    traceable to a row in <code>data.db</code> and back to a line in the
+    original IBKR Activity Statement (CSV) or Flex Web Service (XML) file.
+    Use this page as a checklist when reviewing the output with your accountant.
+  </div>
+
+  <div class="toc">
+    <a href="#ingest">1. Ingestion pipeline</a>
+    <a href="#trades">2. Trades and FIFO lots</a>
+    <a href="#corp-actions">3. Corporate actions</a>
+    <a href="#transfers">4. Transfers between sub-accounts</a>
+    <a href="#open-positions">5. Open positions reconciliation</a>
+    <a href="#fx">6. FX conversion (ECB)</a>
+    <a href="#tob">7. TOB (Tax on Bourse Operations)</a>
+    <a href="#pnl">8. Profit and loss</a>
+    <a href="#performance">9. Performance metrics</a>
+    <a href="#cgt">10. CGT 2026+ (basis reset)</a>
+    <a href="#dividends">11. Dividends and foreign WHT</a>
+    <a href="#capital-events">12. Capital events excluded from dividends</a>
+    <a href="#dedup">13. Deduplication and re-ingest safety</a>
+    <a href="#audit">14. Auditing a single number end-to-end</a>
+  </div>
+
+  <!-- 1. Ingest -->
+  <section id="ingest" class="section">
+    <h2>1. Ingestion pipeline</h2>
+    <p>
+      Two file formats are supported: IBKR Activity Statement CSVs (one file per
+      year, manually downloaded) and IBKR Flex Web Service XMLs (current year,
+      auto-fetched via the user's Flex token + Query ID). Both feed into the
+      same SQLite tables, so the report layer is source-agnostic.
+    </p>
+    <h3>Pipeline order</h3>
+    <ol>
+      <li><strong>Download</strong>: <code class="path">downloaded/&lt;account&gt;/</code> already
+          contains historical CSVs. The current-year XML is fetched on
+          <em>Load data</em> via <code class="path">core/flex_client.py</code>.</li>
+      <li><strong>Ingest</strong>: <code class="path">ingest.py</code> walks every file, calls
+          the matching loader in <code class="path">core/loaders.py</code>, then writes rows
+          to <code class="path">data.db</code> with a UNIQUE constraint on
+          <code>(source_id, identifying-tuple)</code> so re-ingesting is idempotent.</li>
+      <li><strong>FX sync</strong>: ECB EUR/USD daily reference rates from
+          <code class="path">downloaded/ecb_rates.csv</code> are loaded into <code>fx_rates</code>.</li>
+      <li><strong>Reports</strong> read directly from <code>data.db</code> when the user
+          clicks a tab. No intermediate static files.</li>
+    </ol>
+    <p>
+      Each ingested file appears as one row in <code>source_files</code> with its
+      kind (<code>csv</code> / <code>xml</code>), period, and ingestion timestamp.
+      Dropping that row cascades and removes every dependent fact, so a re-ingest
+      with <code>--force</code> rebuilds cleanly.
+    </p>
+  </section>
+
+  <!-- 2. Trades -->
+  <section id="trades" class="section">
+    <h2>2. Trades and FIFO lots</h2>
+    <p>
+      Trade rows are normalised to a single schema (date, symbol, quantity,
+      price, proceeds, commission). XML uses execution-level rows (one per
+      fill); CSV uses order-level rows (already aggregated by IBKR). Either
+      way, the report layer treats them as opaque "events" against a symbol.
+    </p>
+    <h3>Lot accounting</h3>
+    <p>
+      P&amp;L and CGT use first-in-first-out lot matching. Each buy opens a lot
+      with cost basis = price × quantity + commission; each sell closes the
+      oldest open lot first, realising
+    </p>
+    <div class="formula">
+      realised_pnl = (sell_price - lot_cost_per_share) × matched_qty - commissions
+    </div>
+    <p>
+      Symbol canonicalisation strips IBKR's suffix variants (<code>.OLD</code>,
+      <code>.NEW</code>, exchange tags) so a position that gets renamed by a
+      corporate action keeps its lot history. See
+      <code class="path">reports/_helpers.py::canon_symbol</code>.
+    </p>
+  </section>
+
+  <!-- 3. Corporate actions -->
+  <section id="corp-actions" class="section">
+    <h2>3. Corporate actions</h2>
+    <p>
+      Corporate-action rows arrive as free-text descriptions in the CSV.
+      <code class="path">core/loaders.py::_parse_ca_row</code> classifies each row
+      using regex into one of four types:
+    </p>
+    <ul>
+      <li><strong>Stock split</strong> (forward or reverse): existing lots are
+          rescaled by ratio_new / ratio_old. Cost basis per share is divided
+          by the same ratio so total cost is preserved. Fractional residue
+          becomes a small cash payment, captured as a separate trade row.</li>
+      <li><strong>Cash merger</strong>: all open lots are closed at the per-share
+          cash consideration. Realised gain/loss flows into P&amp;L.</li>
+      <li><strong>Stock merger (acquisition)</strong>: old symbol is closed and
+          a new symbol is opened with the same total cost basis, scaled by
+          the new/old ratio. Lot acquisition dates are preserved (this matters
+          for CGT).</li>
+      <li><strong>Delisting</strong>: shares written off at zero. The full cost
+          basis is realised as a loss.</li>
+    </ul>
+    <p>
+      Anything that doesn't match one of the four patterns is logged as
+      <code>type='other'</code> and flagged for manual review.
+    </p>
+  </section>
+
+  <!-- 4. Transfers -->
+  <section id="transfers" class="section">
+    <h2>4. Transfers between sub-accounts</h2>
+    <p>
+      The <em>Transfers</em> section of the Activity Statement records share
+      movements between IBKR sub-accounts (e.g. moving a position from a closed
+      U4 account to a new U7 account). These are NOT taxable events. Phoenix
+      preserves the original lot acquisition date through the transfer so the
+      CGT engine still sees lots as pre-2026 even when they appear in a 2025+
+      file.
+    </p>
+    <p>
+      Direction (<code>IN</code> / <code>OUT</code>) is taken verbatim from the
+      statement. Market value is captured for sanity-check; cost basis comes
+      from the originating lot, not the transfer's market value.
+    </p>
+  </section>
+
+  <!-- 5. Open positions -->
+  <section id="open-positions" class="section">
+    <h2>5. Open positions reconciliation</h2>
+    <p>
+      Each Activity Statement carries an <em>Open Positions</em> snapshot at
+      its end date. After ingest, Phoenix compares its computed open quantity
+      per symbol against this snapshot. A mismatch indicates a missed corporate
+      action, an unrecognised transfer direction, or a manual journal entry
+      IBKR didn't disclose. These show up in the dashboard's
+      <em>OP snapshots</em> counter and feed the <em>Performance</em> diagnostics tab.
+    </p>
+  </section>
+
+  <!-- 6. FX -->
+  <section id="fx" class="section">
+    <h2>6. FX conversion (ECB)</h2>
+    <p>
+      Every USD figure that needs a EUR equivalent uses the ECB EUR/USD daily
+      reference rate on the relevant date (trade date for trades, payment date
+      for dividends). The rate file is
+      <code class="path">downloaded/ecb_rates.csv</code> and is loaded into
+      the <code>fx_rates</code> table. If the requested date is a weekend or
+      holiday, the most recent prior business-day rate is used (a documented
+      ECB convention). See
+      <code class="path">core/ecb_fx_parser.py::get_eur_usd_rate_for_day</code>.
+    </p>
+    <div class="formula">
+      eur_amount = usd_amount / eur_usd_rate_on_date
+    </div>
+    <p>
+      This date-accurate FX is what makes the dividend totals match what your
+      Belgian bank statement would show, rather than what a year-end FX would.
+    </p>
+  </section>
+
+  <!-- 7. TOB -->
+  <section id="tob" class="section">
+    <h2>7. TOB (Tax on Bourse Operations)</h2>
+    <p>
+      Belgium levies a transaction tax on every secondary-market trade, paid
+      in EUR. Phoenix applies the Belgian TOB rate per asset class (currently
+      0.35% for stocks, with caps) to each trade's EUR-converted notional.
+      The result is the audit table you submit to your accountant for the
+      annual TOB declaration.
+    </p>
+    <p>Source: <code class="path">reports/tob.py</code>.</p>
+  </section>
+
+  <!-- 8. P&L -->
+  <section id="pnl" class="section">
+    <h2>8. Profit and loss</h2>
+    <p>P&amp;L breaks into three pieces:</p>
+    <ul>
+      <li><strong>Realised</strong>: proceeds minus cost basis on closed lots,
+          summed by symbol and by year.</li>
+      <li><strong>Unrealised</strong>: current market value minus cost basis on
+          still-open lots. Marks come from the latest year-end snapshot or
+          live Yahoo close.</li>
+      <li><strong>Total</strong>: realised + unrealised. Useful for performance,
+          NOT for tax filings (Belgian tax is generally on realised events only).</li>
+    </ul>
+  </section>
+
+  <!-- 9. Performance -->
+  <section id="performance" class="section">
+    <h2>9. Performance metrics</h2>
+    <p>
+      The Performance tab reports time-weighted return per symbol and per
+      portfolio, plus per-year net flows. Returns are computed in the trade
+      currency (USD for IBKR), not in EUR, to isolate stock performance from
+      FX drift. A separate row shows the EUR-equivalent return so you can
+      see what you actually earned in spending power.
+    </p>
+  </section>
+
+  <!-- 10. CGT -->
+  <section id="cgt" class="section">
+    <h2>10. CGT 2026+ (basis reset on 2025-12-31)</h2>
+    <p>
+      Belgium introduces a capital-gains tax on individual investors starting
+      2026-01-01. The rule, as currently drafted: gains on lots <em>acquired
+      before</em> 2026 are exempt up to the share's market value on
+      <strong>2025-12-31</strong>. Only the gain accumulated AFTER that reset
+      date is taxable.
+    </p>
+    <p>Phoenix implements this as:</p>
+    <ol>
+      <li>Fetch 2025-12-31 closing prices for every held symbol from Yahoo
+          (the <em>Refresh year-end marks</em> button).</li>
+      <li>For lots opened on or before 2025-12-31, replace the original cost
+          basis with the year-end price. The original cost is still kept for
+          the regular P&amp;L view.</li>
+      <li>Realisations from 2026-01-01 onward use the reset basis. A negative
+          delta (the lot is below its 2025-12-31 mark when sold) becomes a
+          deductible loss <em>under the new rules</em>.</li>
+    </ol>
+    <p>
+      <strong>This is a draft implementation</strong>. The final law text may
+      shift before 2026-12-31. The CGT tab clearly labels each row as "pre-reset"
+      or "post-reset" so the figure is rebuildable if the rules change.
+    </p>
+  </section>
+
+  <!-- 11. Dividends -->
+  <section id="dividends" class="section">
+    <h2>11. Dividends and foreign withholding tax</h2>
+    <p>
+      Dividends are read from two places, in this priority order:
+    </p>
+    <ol>
+      <li>The <em>Dividends</em> and <em>Withholding Tax</em> sections of the
+          Activity Statement CSV (one section pair per year).</li>
+      <li>The <em>CashTransactions</em> element of the Flex XML (only present
+          if the Flex Query has the <em>Cash Transactions</em> section enabled
+          for both <code>Dividends</code> and <code>Withholding Tax</code>).</li>
+    </ol>
+    <p>
+      Each dividend row is described by IBKR with a free-text string like
+      <code>NKE(US6541061031) Cash Dividend USD 0.37 per Share (Ordinary Dividend)</code>.
+      <code class="path">core/loaders.py::_parse_dividend_description</code>
+      extracts symbol, ISIN, currency, per-share amount, type tag, and (for WHT
+      rows) the source-country code.
+    </p>
+
+    <h3>Belgian tax treatment (foreign broker)</h3>
+    <ul>
+      <li><strong>Foreign WHT</strong>: {{ "%.0f"|format(us_treaty_rate_pct) }}% on US dividends
+          when W-8BEN is filed (treaty rate). {{ "%.0f"|format(us_default_rate_pct) }}%
+          if no W-8BEN was filed (the 15% difference can be reclaimed from the IRS).
+          For other source countries Phoenix records what IBKR actually withheld and
+          does NOT attempt to recompute the treaty rate.</li>
+      <li><strong>Belgian "précompte mobilier"</strong>: {{ "%.0f"|format(belgian_rate_pct) }}%
+          on the dividend net of foreign WHT. IBKR Ireland is a foreign broker so
+          this is NOT withheld at source; the taxpayer self-declares and pays via
+          their tax return.</li>
+      <li><strong>Annual exemption</strong>: the first €833 of ordinary dividends per
+          taxpayer per year is exempt for income years 2025 and 2026 (confirmed by
+          SPF Finances). For foreign dividends the mechanism is exclusion from
+          declaration: the first €833 isn't declared, and the corresponding
+          foreign WHT also drops out.</li>
+    </ul>
+
+    <h3>Cap by income year</h3>
+    <table class="math-table">
+      <thead><tr><th>Income year</th><th>Filed in</th><th class="num">Cap (EUR)</th></tr></thead>
+      <tbody>
+        {% for yr, cap in exemption_cap_per_year.items() | sort %}
+        <tr><td>{{ yr }}</td><td>{{ yr + 1 }}</td>
+            <td class="num">€{{ "{:,.0f}".format(cap) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>End-to-end math (US individual stock, within the cap)</h3>
+    <table class="math-table">
+      <tr><td>Gross dividend (IBKR)</td><td class="num">$100.00</td></tr>
+      <tr><td>US WHT at source ({{ "%.0f"|format(us_treaty_rate_pct) }}% treaty)</td><td class="num">−$15.00</td></tr>
+      <tr><td>Net received in account</td><td class="num">$85.00</td></tr>
+      <tr><td>Belgian declarable income (within cap)</td><td class="num">€0</td></tr>
+      <tr><td>Belgian précompte due</td><td class="num">€0</td></tr>
+      <tr class="total-row"><td><strong>Total tax burden</strong></td>
+          <td class="num"><strong>15% (US only)</strong></td></tr>
+    </table>
+
+    <h3>Same dividend above the cap</h3>
+    <table class="math-table">
+      <tr><td>Belgian tax base = gross − foreign WHT</td><td class="num">$85.00</td></tr>
+      <tr><td>Belgian précompte ({{ "%.0f"|format(belgian_rate_pct) }}%)</td><td class="num">−$25.50</td></tr>
+      <tr class="total-row"><td><strong>Total tax burden</strong></td>
+          <td class="num"><strong>15% + (30% × 85%) ≈ 40.5%</strong></td></tr>
+    </table>
+  </section>
+
+  <!-- 12. Capital events filter -->
+  <section id="capital-events" class="section">
+    <h2>12. Capital events excluded from dividends</h2>
+    <p>
+      IBKR uses the same "Cash Dividend" wrapper for several payouts that are
+      NOT dividend income. Phoenix detects them by the trailing tag in the
+      description (e.g. <code>(InterimLiquidation)</code>) and drops them from
+      the dividend totals. They belong to the cost-basis / CGT side of the
+      engine, where they're already captured as a realised gain or loss on the
+      underlying trade.
+    </p>
+    <p><strong>Excluded tags (case-insensitive):</strong></p>
+    <div class="pill-row">
+      {% for t in non_dividend_types %}<code>{{ t }}</code>{% endfor %}
+    </div>
+    <p>
+      The match runs against both the parsed type tag and the raw description,
+      so unusually-formatted rows are still caught. A matching withholding-tax
+      row (if any) is excluded too, so the pair vanishes cleanly and doesn't
+      distort the WHT total.
+    </p>
+    <p>
+      Implementation:
+      <code class="path">core/loaders.py::NON_DIVIDEND_TYPES</code> +
+      <code class="path">_is_non_dividend_payout</code>.
+      The filter is applied in all four loaders:
+      <code>load_dividends_csv</code>, <code>load_dividends_xml</code>,
+      <code>load_withholding_csv</code>, <code>load_withholding_xml</code>.
+    </p>
+    <p class="muted" style="font-size:.86rem">
+      Real-world example: <em>RGTPQ</em> (a delisted issuer in Chapter 11) paid
+      out $1,928 in 2026 tagged <code>InterimLiquidation</code>. That cash
+      partially offsets the cost basis of the now-worthless shares, so it
+      shows up as a smaller realised loss in the CGT tab, not as $1,928 of
+      taxable dividend income.
+    </p>
+  </section>
+
+  <!-- 13. Dedup -->
+  <section id="dedup" class="section">
+    <h2>13. Deduplication and re-ingest safety</h2>
+    <p>
+      Every fact table has a UNIQUE index that pairs the originating
+      <code>source_id</code> with a row-identifying tuple. Re-running
+      <code>python ingest.py --force</code> is therefore idempotent: it
+      truncates every table, drops every <code>source_files</code> row, then
+      replays the ingest. After a code change to a loader (like adding the
+      capital-events filter), <code>--force</code> is the correct way to
+      rebuild the affected tables.
+    </p>
+    <p>
+      Without <code>--force</code>, ingestion is incremental: only new files
+      (those whose mtime is later than the recorded ingest timestamp) are
+      re-processed.
+    </p>
+  </section>
+
+  <!-- 14. Audit -->
+  <section id="audit" class="section">
+    <h2>14. Auditing a single number end-to-end</h2>
+    <p>
+      Every figure in every report is traceable back to a row in the source file:
+    </p>
+    <ol>
+      <li>Click the value in the report (most tables expose the underlying rows).</li>
+      <li>Note the <em>source</em> column. It carries the originating filename and
+          row type (e.g. <code>csv-div:U7555888_20250101_20251231.csv</code>).</li>
+      <li>Open that file in <code class="path">downloaded/</code> and find the row by
+          its date + symbol + amount.</li>
+      <li>The math from raw row to displayed figure is described in the corresponding
+          section above.</li>
+    </ol>
+    <p>
+      If a figure doesn't reconcile, the most common causes are: a corporate
+      action that wasn't classified (look in the dashboard log for
+      <code>type='other'</code>), an FX rate missing for a holiday-adjacent
+      date, or a Flex Query that doesn't include the Cash Transactions section
+      (Dividends + Withholding Tax). The Sources tab on the Dividends report
+      lists every ingested file and what it contributed.
+    </p>
+  </section>
+
+  <footer>
+    Methodology page · Phoenix · all numbers traceable to <code>data.db</code>
+    and back to the source statements in <code>downloaded/</code>.
+  </footer>
+</div>
+
+<script>{{ js | safe }}</script>
+</body>
+</html>

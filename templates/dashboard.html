@@ -43,6 +43,19 @@
         <span>YTD Flex Query ID</span>
         <input name="query_id" required pattern="[0-9]+" placeholder="numeric ID from IBKR" autocomplete="off"/>
       </label>
+
+      <div class="notice" style="background:rgba(56,189,248,.08);border:1px solid var(--accent);
+                                  border-left:3px solid var(--accent);border-radius:6px;
+                                  padding:10px 14px;margin:8px 0 4px;font-size:.84rem;color:#bae6fd">
+        <strong>📌 Want dividend data in the Dividends report?</strong>
+        Edit the Flex Query in IBKR Client Portal and add the
+        <strong>Cash Transactions</strong> section, ticking
+        <em>Dividends</em>, <em>Payment In Lieu of Dividends</em>, and
+        <em>Withholding Tax</em>. Without it the current-year XML carries no
+        dividend rows and the Dividends report will only show data from your
+        annual CSV statements.
+      </div>
+
       <div class="actions">
         <button type="button" onclick="closeAddAccount()">Cancel</button>
         <button type="submit" class="primary">Create account</button>
@@ -122,6 +135,8 @@
       CA <strong>{{ db_status.corporate_actions }}</strong> ·
       xfer <strong>{{ db_status.transfers }}</strong> ·
       OP snapshots <strong>{{ db_status.open_positions }}</strong> ·
+      div <strong>{{ db_status.dividends }}</strong> ·
+      WHT <strong>{{ db_status.withholding_tax }}</strong> ·
       FX <strong>{{ db_status.fx_rates }}</strong>
     </div>
     <div class="log" id="log"></div>
@@ -136,6 +151,10 @@
             data-report="performance" onclick="showReport('performance')">Performance</button>
     <button class="tab{% if not s.has_data %} empty{% endif %}"
             data-report="cgt" onclick="showReport('cgt')">CGT 2026+</button>
+    <button class="tab{% if not s.has_data %} empty{% endif %}"
+            data-report="dividends" onclick="showReport('dividends')">Dividends</button>
+    <button class="tab" data-report="methodology" onclick="showReport('methodology')"
+            title="How Phoenix calculates every figure in every report">Methodology</button>
   </div>
 
   <div class="viewer" id="viewer">

@@ -24,8 +24,10 @@ A local web dashboard that turns your Interactive Brokers statements into the ta
 | 🧾 **TOB** | "What 0.35% transaction tax do I owe this period?" |
 | 📊 **P&L Performance** | "Am I actually a good trader? Where did my money come from — picks or just the dollar moving?" |
 | 🪙 **Per-trade detail** | "Show me lot-by-lot what my accountant will see." |
+| 💰 **Dividends** | "What did I receive in dividends, what was withheld at source, and how does the Belgian €833 exemption apply?" |
+| 📚 **Methodology** | "How exactly did Phoenix arrive at every figure above? Where in the code does each rule live?" |
 
-All four are generated from a single click on **⚡ Load data**.
+All reports are generated from a single click on **⚡ Load data**.
 
 ![Dashboard overview](docs/mockups/dashboard.svg)
 
@@ -103,6 +105,39 @@ The classic 0.35% Taxe sur les Opérations de Bourse, computed automatically:
 ![TOB report](docs/mockups/tob-report.svg)
 
 > 🖱 [Open the interactive HTML version →](docs/mockups/tob-report.html)
+
+---
+
+### 💰 Dividends and foreign WHT
+
+A dedicated tab summarises every dividend the broker paid you, the foreign
+withholding tax taken at source, and the estimated Belgian "précompte mobilier"
+you still owe on top.
+
+- Reads from both the **Activity Statement CSV** (Dividends + Withholding Tax sections)
+  and the **Flex XML** (CashTransactions section, when enabled in your Flex Query)
+- Pairs each dividend with its withholding row on (date, symbol, per-share)
+- FX-accurate EUR conversion using the ECB daily rate on each pay date
+- Applies the **€833 annual exemption** (income years 2025 and 2026, per SPF Finances) as
+  exclusion-from-declaration: the first €833 of ordinary dividends is not declared
+  and the matching foreign WHT drops out of the calculation
+- Auto-excludes capital events (`InterimLiquidation`, `LiquidationDividend`,
+  `Return of Capital`, `Capital Gains Distribution`). They belong to the cost-basis
+  / CGT side of the engine, not to dividend income
+- Per-payment, per-symbol, per-year, and per-source-file breakdowns; plus a full
+  Rules & References tab citing CIR 92 art. 21,5°-14° and the BE-US treaty
+
+![Dividends report](docs/mockups/dividends-report.svg)
+
+---
+
+### 📚 Methodology page
+
+A single document covering how Phoenix processes every IBKR file and how every
+figure in every report is computed: ingestion, FIFO lot accounting, corporate
+actions, transfers, FX, TOB, P&L, performance, CGT 2026+ basis reset, dividend
+exemption math, and the capital-events filter. Use it as the audit checklist
+when reviewing the output with your accountant.
 
 ---
 

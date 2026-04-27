@@ -258,3 +258,292 @@ def load_open_positions_csv(path: Path) -> tuple[pd.DataFrame, str | None]:
         except ValueError:
             pass
     return pd.DataFrame(rows), as_of
+
+
+# ---------- Dividend description parsing ----------
+
+# Examples we need to handle:
+#   "NKE(US6541061031) Cash Dividend USD 0.37 per Share (Ordinary Dividend)"
+#   "BABA(US01609W1027) Cash Dividend USD 1.00 per Share (Ordinary Dividend)"
+#   "NKE(US6541061031) Cash Dividend USD 0.37 per Share - US Tax"   (WHT row)
+#   "JD(US47215P1066) Payment in Lieu of Dividend (Ordinary Dividend)"  (no per-share)
+#   "VALE(US91912E1055) Cash Dividend USD 0.0481 per Share - BR Tax"
+_DIV_HEAD_RE = re.compile(
+    r"^(?P<symbol>[A-Z][A-Z0-9.]*)\s*\((?P<isin>[A-Z0-9]+)\)\s*"
+)
+_DIV_PERSHARE_RE = re.compile(
+    r"Cash Dividend\s+(?P<ccy>[A-Z]{3})\s+(?P<per_share>[\d.]+)\s+per Share"
+)
+_DIV_PIL_RE = re.compile(r"Payment in Lieu of Dividend", re.IGNORECASE)
+_DIV_TYPE_RE = re.compile(r"\((?P<type>[^)]+)\)\s*$")
+_WHT_COUNTRY_RE = re.compile(r"-\s*(?P<country>[A-Z]+)\s+Tax\b")
+
+
+# IBKR labels these as "Dividend" cash transactions at the top level, but the
+# trailing tag in the description tells us they're capital events, not income:
+#   InterimLiquidation     — bankruptcy estate distributing cash
+#   LiquidationDividend    — final liquidation payout
+#   Return Of Capital      — partial return of original investment (REITs etc.)
+#   Capital Gains Distribution — mutual-fund cap-gains pass-through (different tax treatment)
+# These should be netted against the cost basis in the CGT report (not yet
+# implemented — follow-up). For the dividend report they must be excluded so
+# they don't get taxed as ordinary dividend income.
+NON_DIVIDEND_TYPES = {
+    "interimliquidation",
+    "liquidationdividend",
+    "liquidation",
+    "return of capital",
+    "capital gains distribution",
+}
+
+
+def _is_non_dividend_payout(desc: str, parsed_type: str) -> bool:
+    """True if a description / parsed-type indicates this is a capital event,
+    not a real dividend payout. Case-insensitive substring match against the
+    NON_DIVIDEND_TYPES set."""
+    pt = (parsed_type or "").strip().lower()
+    if pt in NON_DIVIDEND_TYPES:
+        return True
+    # Fall back to substring scan in the raw description, just in case the
+    # parser missed the trailing-paren tag for an unusual format.
+    desc_low = (desc or "").lower()
+    return any(token in desc_low for token in NON_DIVIDEND_TYPES)
+
+
+def _parse_dividend_description(desc: str) -> dict:
+    """Extract symbol, ISIN, per-share amount, type, and WHT-country (if any).
+
+    Robust to several IBKR description variants:
+      - "Cash Dividend USD X per Share (Type)"
+      - "Cash Dividend USD X per Share - CC Tax"   (WHT row)
+      - "Payment in Lieu of Dividend (Type)"        (short-sale PIL row, no per-share)
+
+    Returns a dict with: symbol, isin, per_share, dividend_type, source_country.
+    Empty strings / None for missing pieces.
+    """
+    out = {"symbol": "", "isin": "", "per_share": None,
+           "dividend_type": "", "source_country": ""}
+    if not desc:
+        return out
+    s = desc.strip()
+    m = _DIV_HEAD_RE.match(s)
+    if not m:
+        return out
+    out["symbol"] = m.group("symbol")
+    out["isin"] = m.group("isin")
+
+    pm = _DIV_PERSHARE_RE.search(s)
+    if pm:
+        try:
+            out["per_share"] = float(pm.group("per_share"))
+        except (TypeError, ValueError):
+            out["per_share"] = None
+    elif _DIV_PIL_RE.search(s):
+        # Payment in Lieu has no per-share figure; flag the type.
+        out["dividend_type"] = "Payment in Lieu"
+
+    tm = _DIV_TYPE_RE.search(s)
+    if tm:
+        # Don't overwrite an explicit "Payment in Lieu" tag set above.
+        if not out["dividend_type"]:
+            out["dividend_type"] = tm.group("type").strip()
+
+    cm = _WHT_COUNTRY_RE.search(s)
+    if cm:
+        out["source_country"] = cm.group("country")
+    return out
+
+
+# ---------- Dividend / withholding-tax loaders (CSV) ----------
+
+def load_dividends_csv(path: Path) -> pd.DataFrame:
+    """Parse the 'Dividends' section of an IBKR Activity Statement CSV.
+
+    Columns (post-parsing): pay_date, symbol, isin, description, currency,
+    amount, per_share, dividend_type, source.
+    Returns an empty DataFrame if the section is missing or empty.
+    """
+    rows = []
+    header = None
+    with open(path, "r", encoding="utf-8") as f:
+        for cols in csv_mod.reader(f):
+            if not cols or cols[0] != "Dividends":
+                continue
+            if cols[1] == "Header":
+                header = cols
+                continue
+            if not header or cols[1] != "Data" or len(cols) != len(header):
+                continue
+            d = dict(zip(header, cols))
+            desc = d.get("Description", "") or ""
+            # Skip "Total" / aggregate rows that IBKR sometimes emits.
+            if desc.strip().lower().startswith("total"):
+                continue
+            parsed = _parse_dividend_description(desc)
+            if not parsed["symbol"]:
+                continue
+            # Skip capital events (liquidations, return-of-capital). These
+            # get netted against the cost basis, not taxed as dividend income.
+            if _is_non_dividend_payout(desc, parsed["dividend_type"]):
+                continue
+            rows.append({
+                "source": f"csv-div:{path.name}",
+                "pay_date": (d.get("Date") or "").strip(),
+                "symbol": _canon_symbol(parsed["symbol"]),
+                "isin": parsed["isin"],
+                "description": desc,
+                "currency": (d.get("Currency") or "USD").strip(),
+                "amount": _to_float(d.get("Amount")),
+                "per_share": parsed["per_share"],
+                "dividend_type": parsed["dividend_type"],
+            })
+    return pd.DataFrame(rows)
+
+
+def load_withholding_csv(path: Path) -> pd.DataFrame:
+    """Parse the 'Withholding Tax' section. Rows pair to dividend rows by
+    (pay_date, symbol, per_share). Amount is typically negative.
+
+    Columns: pay_date, symbol, isin, description, currency, amount, per_share,
+    source_country, code, source.
+    """
+    rows = []
+    header = None
+    with open(path, "r", encoding="utf-8") as f:
+        for cols in csv_mod.reader(f):
+            if not cols or cols[0] != "Withholding Tax":
+                continue
+            if cols[1] == "Header":
+                header = cols
+                continue
+            if not header or cols[1] != "Data" or len(cols) != len(header):
+                continue
+            d = dict(zip(header, cols))
+            desc = d.get("Description", "") or ""
+            if desc.strip().lower().startswith("total"):
+                continue
+            parsed = _parse_dividend_description(desc)
+            if not parsed["symbol"]:
+                continue
+            # Skip WHT rows attached to capital events (liquidations etc.).
+            # The matching dividend row is excluded too, so the pair vanishes.
+            if _is_non_dividend_payout(desc, parsed.get("dividend_type", "")):
+                continue
+            rows.append({
+                "source": f"csv-wht:{path.name}",
+                "pay_date": (d.get("Date") or "").strip(),
+                "symbol": _canon_symbol(parsed["symbol"]),
+                "isin": parsed["isin"],
+                "description": desc,
+                "currency": (d.get("Currency") or "USD").strip(),
+                "amount": _to_float(d.get("Amount")),
+                "per_share": parsed["per_share"],
+                "source_country": parsed["source_country"],
+                "code": (d.get("Code") or "").strip(),
+            })
+    return pd.DataFrame(rows)
+
+
+# ---------- Dividend / withholding-tax loaders (XML) ----------
+
+def load_dividends_xml(path: Path) -> pd.DataFrame:
+    """Parse <CashTransactions type='Dividends'> from a Flex XML.
+
+    Most users don't have this section enabled in their Flex Query; in that
+    case the function returns an empty DataFrame and the caller should fall
+    back to the CSV loader. To enable: in IBKR Client Portal, edit the Flex
+    Query and add the 'Cash Transactions' section with type 'Dividends' and
+    'Withholding Tax'.
+    """
+    rows = []
+    try:
+        tree = ET.parse(path)
+        root = tree.getroot()
+    except ET.ParseError:
+        return pd.DataFrame()
+
+    for el in root.findall(".//CashTransactions/CashTransaction"):
+        a = el.attrib
+        ttype = (a.get("type") or "").lower()
+        # IBKR uses "Dividends" or "Payment In Lieu Of Dividends" here.
+        if "dividend" not in ttype:
+            continue
+        if "withholding" in ttype or "tax" in ttype:
+            continue
+        desc = a.get("description") or ""
+        parsed = _parse_dividend_description(desc)
+        if not parsed["symbol"]:
+            # Fall back to the symbol attribute if description didn't parse.
+            parsed["symbol"] = a.get("symbol", "") or ""
+            if not parsed["symbol"]:
+                continue
+        # Skip capital events. The XML loader is the critical one for the RGTPQ
+        # InterimLiquidation case because that data only lives in the Flex XML.
+        if _is_non_dividend_payout(desc, parsed.get("dividend_type", "")):
+            continue
+        rows.append({
+            "source": f"xml-div:{path.name}",
+            "pay_date": _xml_date_to_iso(a.get("dateTime") or a.get("settleDate", "")),
+            "symbol": _canon_symbol(parsed["symbol"]),
+            "isin": parsed["isin"] or (a.get("isin") or ""),
+            "description": desc,
+            "currency": a.get("currency", "USD"),
+            "amount": _to_float(a.get("amount")),
+            "per_share": parsed["per_share"],
+            "dividend_type": parsed["dividend_type"] or a.get("type", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def load_withholding_xml(path: Path) -> pd.DataFrame:
+    """Parse <CashTransactions type='Withholding Tax'> from a Flex XML.
+    Returns empty DataFrame when the section isn't enabled in the Flex Query."""
+    rows = []
+    try:
+        tree = ET.parse(path)
+        root = tree.getroot()
+    except ET.ParseError:
+        return pd.DataFrame()
+
+    for el in root.findall(".//CashTransactions/CashTransaction"):
+        a = el.attrib
+        ttype = (a.get("type") or "").lower()
+        if "withholding" not in ttype:
+            continue
+        desc = a.get("description") or ""
+        parsed = _parse_dividend_description(desc)
+        if not parsed["symbol"]:
+            parsed["symbol"] = a.get("symbol", "") or ""
+            if not parsed["symbol"]:
+                continue
+        # Skip WHT rows that pair with a capital event.
+        if _is_non_dividend_payout(desc, parsed.get("dividend_type", "")):
+            continue
+        rows.append({
+            "source": f"xml-wht:{path.name}",
+            "pay_date": _xml_date_to_iso(a.get("dateTime") or a.get("settleDate", "")),
+            "symbol": _canon_symbol(parsed["symbol"]),
+            "isin": parsed["isin"] or (a.get("isin") or ""),
+            "description": desc,
+            "currency": a.get("currency", "USD"),
+            "amount": _to_float(a.get("amount")),
+            "per_share": parsed["per_share"],
+            "source_country": parsed["source_country"],
+            "code": a.get("code", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def _xml_date_to_iso(raw: str) -> str:
+    """Flex XML dates: '20240115' or '20240115;093200' or '2024-01-15'.
+    Normalize to ISO 'YYYY-MM-DD'."""
+    if not raw:
+        return ""
+    s = raw.split(";")[0].strip()
+    # Already ISO?
+    if "-" in s and len(s) >= 10:
+        return s[:10]
+    # Compact YYYYMMDD
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s

@@ -1,5 +1,5 @@
 """
-Belgian Capital Gains Tax (CGT) on financial assets — 2026+ regime.
+Belgian Capital Gains Tax (CGT) on financial assets, 2026+ regime.
 
 Implements the new tax that takes effect on 1 January 2026:
 - Flat **10%** rate on net realized gains from financial assets.
@@ -9,7 +9,7 @@ Implements the new tax that takes effect on 1 January 2026:
 - All gains realized **on or before 31 December 2025 are exempt** under
   the transitional rule.
 - For lots opened before 1 January 2026 and sold afterward, the cost
-  basis is **reset to the 31 Dec 2025 market price** — but the original
+  basis is **reset to the 31 Dec 2025 market price**, but the original
   historical basis may be used instead if it is *higher* (favorable to
   the taxpayer), available for 5 years post-enactment.
 - Losses offset gains within the **same year only**; no carry-forward.
@@ -19,9 +19,9 @@ July 2025 (parliamentary text not yet final at that time).
 
 This calculator deliberately does *not* implement:
 - The 33% rate on internal capital gains (sale of shares to a controlled
-  company) — separate special regime.
+  company): separate special regime.
 - The progressive 0% / 1.25% / 2.5% / 5% / 10% scheme for substantial
-  shareholdings (≥20%) — also separate.
+  shareholdings (≥20%): also separate.
 - The 16.5% rate on transfers to non-EEA entities.
 
 These additional regimes require explicit per-trade flags that retail
@@ -80,7 +80,7 @@ def annotate_tax_basis(
       - `tax_basis_per_share_usd`: per-share USD value used (for the reset path)
       - `ye_mark_usd`         : the 2025-12-31 close used (None if missing)
       - `tax_realized_eur`    : proceeds_eur - tax_basis_eur (only when taxable)
-      - `mark_status`         : "ok" | "missing" | "n/a" — was a mark needed and
+      - `mark_status`         : "ok" | "missing" | "n/a". Was a mark needed and
                                  did we have one?
     """
     if closed.empty:
@@ -111,7 +111,7 @@ def annotate_tax_basis(
         proceeds_eur = row.get("proceeds_eur")
 
         if not row["is_pre_reset_lot"]:
-            # Lot opened in 2026+ — original basis applies, no reset.
+            # Lot opened in 2026+: original basis applies, no reset.
             tax_basis_source.append("original")
             tax_basis_eur.append(original_basis_eur)
             tax_basis_per_share.append(row.get("buy_price_usd"))
@@ -124,13 +124,13 @@ def annotate_tax_basis(
             )
             continue
 
-        # Pre-2026 lot — compute reset basis and pick the max.
+        # Pre-2026 lot: compute reset basis and pick the max.
         symbol = row.get("symbol", "")
         qty = float(row.get("quantity") or 0)
         mark = (year_end_marks.get(symbol) or {}).get("close_price")
 
         if mark is None or fx_2025_12_31 is None or fx_2025_12_31 <= 0 or qty <= 0:
-            # No reset basis available — fall back to original. Flag for UI.
+            # No reset basis available: fall back to original. Flag for UI.
             tax_basis_source.append("original (mark missing)")
             tax_basis_eur.append(original_basis_eur)
             tax_basis_per_share.append(row.get("buy_price_usd"))
@@ -332,7 +332,7 @@ def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
     conn.close()
 
     # Surface auto-detected ticker changes (Chapter-11 renames, CUSIP/ISIN
-    # swaps IBKR forgot to flag as a CA, etc.) — compute once and pass into
+    # swaps IBKR forgot to flag as a CA, etc.). Compute once and pass into
     # `match_lots` so it doesn't re-detect on its own. We need them out here
     # too so the report's "Detected renames" tab can list them with rationale.
     auto_changes = _pnl._detect_symbol_changes(
@@ -367,7 +367,7 @@ def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
 
 def _render_annual_rows(annual: list[dict]) -> str:
     if not annual:
-        return ('<tr><td colspan="9" class="muted">No taxable years yet — '
+        return ('<tr><td colspan="9" class="muted">No taxable years yet. '
                 'the new regime starts 1 January 2026.</td></tr>')
     rows = []
     for r in annual:
@@ -400,7 +400,7 @@ _CLOSE_TYPE_LABELS = {
 
 
 def _close_type_html(close_type: str) -> str:
-    label, cls = _CLOSE_TYPE_LABELS.get(close_type, (close_type or "—", "tag-orig"))
+    label, cls = _CLOSE_TYPE_LABELS.get(close_type, (close_type or "·", "tag-orig"))
     return f'<span class="basis-tag {cls}">{html.escape(label)}</span>'
 
 
@@ -410,7 +410,7 @@ def _aggregate_by_symbol(df: pd.DataFrame) -> pd.DataFrame:
 
     Output columns: symbol, total_eur, n_lots, dominant_type, has_forced
     Sorted by total_eur ascending (most-negative first for losses) /
-    descending caller (most-positive first for gains) — handled outside.
+    descending caller (most-positive first for gains); handled outside.
     """
     if df.empty:
         return pd.DataFrame(columns=["symbol", "total_eur", "n_lots",
@@ -472,7 +472,7 @@ def _render_per_trade_rows(tax_trades: pd.DataFrame) -> str:
     taxable = tax_trades[tax_trades["is_taxable_year"] == True].copy()
     if taxable.empty:
         return ('<tr><td colspan="11" class="muted">'
-                'No trades closed in 2026 or later — nothing to tax.</td></tr>')
+                'No trades closed in 2026 or later, nothing to tax.</td></tr>')
 
     taxable = taxable.sort_values(["sell_date", "symbol"])
     rows = []
@@ -496,7 +496,7 @@ def _render_per_trade_rows(tax_trades: pd.DataFrame) -> str:
         original_basis_per_share = t.get("buy_price_usd")
         ye_mark = t.get("ye_mark_usd")
         ye_cell = (f"{ye_mark:,.4f}"
-                   if ye_mark is not None and not pd.isna(ye_mark) else "—")
+                   if ye_mark is not None and not pd.isna(ye_mark) else "·")
 
         # Highlight rows from forced closes so the accountant can spot them.
         row_attr = ' class="forced-close-row"' if close_type in _FORCED_CLOSE_TYPES else ""
@@ -541,7 +541,7 @@ def _render_year_offset_rows(tax_trades: pd.DataFrame, annual: list[dict]) -> st
             continue
 
         # Split losses: forced closes (bankruptcies/delistings/mergers) vs regular sells.
-        # Tax law treats them identically — both reduce taxable gain — but the
+        # Tax law treats them identically (both reduce taxable gain) but the
         # accountant wants to see them separately for audit.
         losses_all = g[g["tax_realized_eur"] < 0]
         losses_forced = losses_all[
@@ -668,7 +668,7 @@ def _render_marks_status(
         else:
             rows.append(
                 f"<tr><td>{html.escape(sym)}</td>"
-                f"<td class='num muted'>—</td>"
+                f"<td class='num muted'>·</td>"
                 f"<td><span class='basis-tag tag-missing'>missing</span></td>"
                 f"<td class='muted'>fall back to original buy basis</td></tr>"
             )

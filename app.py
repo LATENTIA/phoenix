@@ -362,6 +362,12 @@ def report(kind: str, account: str):
         elif kind == "cgt":
             from reports import cgt as _cgt
             html = _cgt.build_cgt_html(code)
+        elif kind == "dividends":
+            from reports import dividends as _div
+            html = _div.build_dividends_html(code)
+        elif kind == "methodology":
+            from reports import methodology as _meth
+            html = _meth.build_methodology_html(code)
         else:
             log.warning(f"report: unknown kind {kind!r}")
             abort(404, f"Unknown report kind: {kind}")

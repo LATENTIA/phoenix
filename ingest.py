@@ -69,8 +69,9 @@ def _ibkr_account_from(path: Path) -> str | None:
 
 
 def ingest_file(conn, code: str, account_name: str, kind: str, path: Path) -> dict:
-    """Ingest a single file. Returns counts."""
-    counts = {"trades": 0, "ca": 0, "transfers": 0, "open_positions": 0}
+    """Ingest a single file. Returns counts (incl. dividends + WHT)."""
+    counts = {"trades": 0, "ca": 0, "transfers": 0, "open_positions": 0,
+              "dividends": 0, "withholding_tax": 0}
 
     ibkr_account = _ibkr_account_from(path)
     source_id = db.upsert_source(conn, path, code, kind, ibkr_account)
@@ -80,6 +81,12 @@ def ingest_file(conn, code: str, account_name: str, kind: str, path: Path) -> di
         counts["trades"] = db.insert_trades(conn, source_id, code, df_trades)
         df_op, as_of = loaders.load_open_positions_xml(path)
         counts["open_positions"] = db.insert_open_positions(conn, source_id, code, as_of, df_op)
+        # Dividends & WHT live in <CashTransactions> when the Flex Query is
+        # configured to include that section. Empty DataFrames otherwise.
+        df_div = loaders.load_dividends_xml(path)
+        counts["dividends"] = db.insert_dividends(conn, source_id, code, df_div)
+        df_wht = loaders.load_withholding_xml(path)
+        counts["withholding_tax"] = db.insert_withholding(conn, source_id, code, df_wht)
     else:  # csv
         df_trades = loaders.load_statement_csv(path)
         counts["trades"] = db.insert_trades(conn, source_id, code, df_trades)
@@ -89,6 +96,10 @@ def ingest_file(conn, code: str, account_name: str, kind: str, path: Path) -> di
         counts["transfers"] = db.insert_transfers(conn, source_id, code, df_xf)
         df_op, as_of = loaders.load_open_positions_csv(path)
         counts["open_positions"] = db.insert_open_positions(conn, source_id, code, as_of, df_op)
+        df_div = loaders.load_dividends_csv(path)
+        counts["dividends"] = db.insert_dividends(conn, source_id, code, df_div)
+        df_wht = loaders.load_withholding_csv(path)
+        counts["withholding_tax"] = db.insert_withholding(conn, source_id, code, df_wht)
 
     conn.commit()
     return counts
@@ -102,7 +113,9 @@ def ingest_account(conn, code: str, *, force: bool = False, log=print) -> dict:
     account_name = accounts[code]
     files = _files_for_account(account_name)
     summary = {"account": account_name, "scanned": len(files), "ingested": 0,
-               "skipped": 0, "totals": {"trades": 0, "ca": 0, "transfers": 0, "open_positions": 0},
+               "skipped": 0,
+               "totals": {"trades": 0, "ca": 0, "transfers": 0, "open_positions": 0,
+                          "dividends": 0, "withholding_tax": 0},
                "files": []}
 
     for kind, path in files:
@@ -116,7 +129,8 @@ def ingest_account(conn, code: str, *, force: bool = False, log=print) -> dict:
             summary["totals"][k] += v
         summary["files"].append({"path": path.name, "status": "ingested", **counts})
         log(f"  [{kind}] {path.name}  trades={counts['trades']} "
-            f"ca={counts['ca']} xfer={counts['transfers']} op={counts['open_positions']}")
+            f"ca={counts['ca']} xfer={counts['transfers']} op={counts['open_positions']} "
+            f"div={counts['dividends']} wht={counts['withholding_tax']}")
 
     return summary
 

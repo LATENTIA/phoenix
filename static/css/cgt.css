@@ -113,4 +113,21 @@ body.privacy td.num:hover{filter:none}
        cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:100;padding:0}
 #privacy-toggle:hover{border-color:var(--accent);color:var(--accent)}
 
+/* ---------- Rules & References tab ---------- */
+.rules-doc h4{margin:18px 0 8px;font-size:.95rem;color:var(--text);font-weight:700}
+.rules-doc h4:first-child{margin-top:0}
+.rules-doc p{margin:6px 0;font-size:.92rem;line-height:1.55}
+.rules-doc ul{margin:6px 0 12px;padding-left:22px;font-size:.92rem;line-height:1.55}
+.rules-doc li{margin-bottom:4px}
+.rules-doc a{color:var(--accent);text-decoration:none}
+.rules-doc a:hover{text-decoration:underline}
+.rules-doc .table-wrap{margin:10px 0 16px}
+.math-table{background:var(--panel);border:1px solid var(--border);border-radius:8px;
+            border-collapse:collapse;width:100%;max-width:560px;margin:8px 0 16px}
+.math-table td{padding:8px 14px;border-bottom:1px solid var(--border);
+               font-variant-numeric:tabular-nums;font-size:.9rem}
+.math-table tr:last-child td{border-bottom:none}
+.math-table .num{text-align:right}
+.math-table tr.total-row td{background:var(--panel-2);border-top:2px solid var(--border)}
+
 footer{margin-top:24px;color:var(--muted);font-size:.8rem;text-align:center}
