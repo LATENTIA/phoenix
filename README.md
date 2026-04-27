@@ -127,6 +127,8 @@ you still owe on top.
 - Per-payment, per-symbol, per-year, and per-source-file breakdowns; plus a full
   Rules & References tab citing CIR 92 art. 21,5°-14° and the BE-US treaty
 
+![Dividends report](docs/mockups/dividends-report.svg)
+
 ---
 
 ### 📚 Methodology page
