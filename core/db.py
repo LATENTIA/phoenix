@@ -161,6 +161,56 @@ CREATE TABLE IF NOT EXISTS year_end_marks (
     note        TEXT,                    -- optional free-form (e.g. "delisted, no quote")
     PRIMARY KEY (symbol, date)
 );
+
+-- Cash dividends received. CSV "Dividends" section and (when present)
+-- XML <CashTransactions type="Dividends">. Belgian individuals must declare
+-- foreign dividends and pay 30% precompte mobilier; this table is the input.
+CREATE TABLE IF NOT EXISTS dividends (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id       INTEGER NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+    account_code    TEXT NOT NULL,
+    pay_date        TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    isin            TEXT,
+    description     TEXT,
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    amount          REAL NOT NULL,        -- gross dividend in `currency`
+    per_share       REAL,
+    dividend_type   TEXT                  -- "Ordinary", "Qualified", "PIL", etc.
+);
+CREATE INDEX IF NOT EXISTS idx_div_account_date ON dividends(account_code, pay_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_dividends ON dividends (
+    account_code,
+    pay_date,
+    symbol,
+    COALESCE(amount, 0),
+    COALESCE(description, '')
+);
+
+-- Foreign withholding tax taken at source (typically -15% for US dividends
+-- under the Belgium-US treaty when W-8BEN is filed; -30% otherwise).
+CREATE TABLE IF NOT EXISTS withholding_tax (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id       INTEGER NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+    account_code    TEXT NOT NULL,
+    pay_date        TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    isin            TEXT,
+    description     TEXT,
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    amount          REAL NOT NULL,        -- typically negative (tax taken)
+    per_share       REAL,                 -- per-share dividend this WHT pairs with
+    source_country  TEXT,                 -- e.g. "US", "NL" (parsed from description)
+    code            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wht_account_date ON withholding_tax(account_code, pay_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_withholding_tax ON withholding_tax (
+    account_code,
+    pay_date,
+    symbol,
+    COALESCE(amount, 0),
+    COALESCE(description, '')
+);
 """
 
 
@@ -412,6 +462,40 @@ def insert_transfers(conn: sqlite3.Connection, source_id: int,
     return len(rows)
 
 
+def insert_dividends(conn: sqlite3.Connection, source_id: int,
+                      account_code: str, df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    cols = ["pay_date", "symbol", "isin", "description", "currency",
+            "amount", "per_share", "dividend_type"]
+    rows = _df_records(df, cols, {"source_id": source_id, "account_code": account_code})
+    conn.executemany(
+        """INSERT OR IGNORE INTO dividends
+           (pay_date, symbol, isin, description, currency, amount,
+            per_share, dividend_type, source_id, account_code)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        rows,
+    )
+    return len(rows)
+
+
+def insert_withholding(conn: sqlite3.Connection, source_id: int,
+                        account_code: str, df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    cols = ["pay_date", "symbol", "isin", "description", "currency",
+            "amount", "per_share", "source_country", "code"]
+    rows = _df_records(df, cols, {"source_id": source_id, "account_code": account_code})
+    conn.executemany(
+        """INSERT OR IGNORE INTO withholding_tax
+           (pay_date, symbol, isin, description, currency, amount,
+            per_share, source_country, code, source_id, account_code)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        rows,
+    )
+    return len(rows)
+
+
 def insert_open_positions(conn: sqlite3.Connection, source_id: int,
                           account_code: str, as_of: str, df: pd.DataFrame) -> int:
     if df.empty or not as_of:
@@ -457,6 +541,8 @@ def status(conn: sqlite3.Connection) -> dict:
         "corporate_actions": n("corporate_actions"),
         "transfers": n("transfers"),
         "open_positions": n("open_positions_snapshots"),
+        "dividends": n("dividends"),
+        "withholding_tax": n("withholding_tax"),
         "fx_rates": n("fx_rates"),
         "last_ingest": dict(last_ingest_row) if last_ingest_row else None,
     }
@@ -552,6 +638,49 @@ def get_open_positions_snapshots(conn: sqlite3.Connection, account_code: str) ->
         )
         out.append((as_of, op))
     return out
+
+
+def get_dividends(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:
+    """Return cash dividends for an account (joined to source_files for traceability)."""
+    return pd.read_sql_query(
+        """SELECT
+              ('db:' || sf.path) AS source,
+              d.pay_date         AS pay_date,
+              d.symbol           AS symbol,
+              d.isin             AS isin,
+              d.description      AS description,
+              d.currency         AS currency,
+              d.amount           AS amount,
+              d.per_share        AS per_share,
+              d.dividend_type    AS dividend_type
+           FROM dividends d
+           JOIN source_files sf ON sf.id = d.source_id
+           WHERE d.account_code = ?
+           ORDER BY d.pay_date, d.symbol""",
+        conn, params=(account_code,),
+    )
+
+
+def get_withholding(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:
+    """Return foreign withholding-tax entries for an account."""
+    return pd.read_sql_query(
+        """SELECT
+              ('db:' || sf.path)  AS source,
+              w.pay_date          AS pay_date,
+              w.symbol            AS symbol,
+              w.isin              AS isin,
+              w.description       AS description,
+              w.currency          AS currency,
+              w.amount            AS amount,
+              w.per_share         AS per_share,
+              w.source_country    AS source_country,
+              w.code              AS code
+           FROM withholding_tax w
+           JOIN source_files sf ON sf.id = w.source_id
+           WHERE w.account_code = ?
+           ORDER BY w.pay_date, w.symbol""",
+        conn, params=(account_code,),
+    )
 
 
 def get_known_accounts(conn: sqlite3.Connection) -> set[str]:
