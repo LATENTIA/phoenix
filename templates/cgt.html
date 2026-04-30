@@ -1,14 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Phoenix · Belgian CGT · {{ account }}</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
-<style>{{ css | safe }}</style>
-</head>
-<body>
-<button id="privacy-toggle" title="Hide/show values" aria-label="Toggle privacy">👁</button>
-<div class="container">
+{% extends "_base_report.html" %}
+{% block title %}Belgian CGT · {{ account }}{% endblock %}
+{% block footer_meta %}Computed using {{ method }} matching · 10% rate · €{{ "{:,.0f}".format(annual_exemption) }} annual exemption · €{{ "{:,.0f}".format(max_yearly_carry) }}/yr rollover (cap €{{ "{:,.0f}".format(max_carry_bank) }}){% endblock %}
+{% block content %}
   <h1>Belgian Capital Gains Tax, <span class="account">{{ account }}</span>
     <span class="tag">{{ method }}</span>
     <span class="tag">10% from {{ regime_start }}</span>
@@ -355,9 +348,4 @@
     </div>
   </div>
 
-  <footer>Computed using {{ method }} matching · 10% rate · €{{ "{:,.0f}".format(annual_exemption) }} annual exemption · €{{ "{:,.0f}".format(max_yearly_carry) }}/yr rollover (cap €{{ "{:,.0f}".format(max_carry_bank) }})</footer>
-</div>
-
-<script>{{ js | safe }}</script>
-</body>
-</html>
+{% endblock %}

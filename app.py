@@ -379,6 +379,17 @@ def report(kind: str, account: str):
     return Response(html, mimetype="text/html; charset=utf-8")
 
 
+@app.route("/license")
+def license_page():
+    """Render the LICENSE file as a styled in-app page so the dashboard
+    footer's 'non-commercial use' link has somewhere to point."""
+    from pathlib import Path
+    license_path = Path(__file__).parent / "LICENSE"
+    license_text = license_path.read_text(encoding="utf-8") if license_path.exists() \
+        else "LICENSE file not found in repo root."
+    return render_template("license.html", license_text=license_text)
+
+
 if __name__ == "__main__":
     # Bind to localhost only — never expose to the network.
     app.run(host="127.0.0.1", port=5000, debug=False)

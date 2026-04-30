@@ -1,14 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Phoenix — TOB — {{ account }}</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
-<style>{{ css | safe }}</style>
-</head>
-<body>
-<button id="privacy-toggle" title="Hide/show values" aria-label="Toggle privacy">👁</button>
-<div class="container">
+{% extends "_base_report.html" %}
+{% block title %}TOB · {{ account }}{% endblock %}
+{% block footer_meta %}EUR/USD: <span class="src-override">override</span> = from reconciled file, <span class="src-ecb">ecb</span> = ECB daily reference · TOB = {{ tob_pct }}% of |proceeds| in EUR{% endblock %}
+{% block content %}
   <header>
     <div>
       <h1>Trade Statement — <span class="account">{{ account }}</span></h1>
@@ -68,9 +61,4 @@
     </table>
   </div>
 
-  <footer>EUR/USD: <span class="src-override">override</span> = from reconciled file, <span class="src-ecb">ecb</span> = ECB daily reference · TOB = {{ tob_pct }}% of |proceeds| in EUR</footer>
-</div>
-
-<script>{{ js | safe }}</script>
-</body>
-</html>
+{% endblock %}

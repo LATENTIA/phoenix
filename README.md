@@ -229,6 +229,21 @@ upcoming versions, roughly in the order they're likely to ship:
 
 ---
 
+## 📜 License
+
+Phoenix is **source-available** under a non-commercial-use license.
+
+- ✅ **Free** for personal use, code review, modification, and pull requests.
+- ✅ **Free** to fork and run on your own machine to file your own taxes.
+- 💼 **Commercial use** (hosting Phoenix as a paid service, embedding it in a paid
+  product, or using it inside a for-profit accounting / wealth-management practice)
+  requires a separate license from [Latentia](https://www.latentia.ai/).
+
+See [`LICENSE`](LICENSE) for the full terms. To inquire about a commercial license,
+contact us via [latentia.ai](https://www.latentia.ai/).
+
+---
+
 ## ⚠️ Disclaimer
 
 This tool implements Belgian tax law as described in the KPMG July 2025 reference text. The legislation was
@@ -255,3 +270,5 @@ symbol-change detection), see the docstrings in `reports/cgt.py` and `reports/pn
 ---
 
 🦅 *Built for FIRE-minded Belgian traders who want to know exactly what they owe — and exactly why.*
+
+<sub>Built by **[Latentia](https://www.latentia.ai/)** · Free for personal, non-commercial use · [Commercial licensing on request](https://www.latentia.ai/)</sub>
