@@ -36,3 +36,4 @@ Thumbs.db
 # audit trail but should not ship in the repo.
 reports/_pnl_legacy.pyc
 reports/_pnl_decompiled_reference.txt
+requested.txt

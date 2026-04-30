@@ -1,14 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Phoenix · Dividends · {{ account }}</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
-<style>{{ css | safe }}</style>
-</head>
-<body>
-<button id="privacy-toggle" title="Hide/show values" aria-label="Toggle privacy">👁</button>
-<div class="container">
+{% extends "_base_report.html" %}
+{% block title %}Dividends · {{ account }}{% endblock %}
+{% block footer_meta %}EUR conversion uses the ECB EUR/USD reference rate on each payment date · Belgian tax estimate is informational, not legal advice{% endblock %}
+{% block content %}
   <h1>Dividends, <span class="account">{{ account }}</span></h1>
   <div class="muted">Report built: {{ now }}</div>
 
@@ -336,9 +329,4 @@
     </div>
   </div>
 
-  <footer>EUR conversion uses the ECB EUR/USD reference rate on each payment date · Belgian tax estimate is informational, not legal advice</footer>
-</div>
-
-<script>{{ js | safe }}</script>
-</body>
-</html>
+{% endblock %}

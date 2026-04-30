@@ -1,15 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Phoenix — P&amp;L — {{ account }} ({{ method }})</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
-<style>{{ css | safe }}</style>
-</head>
-<body>
-<button id="privacy-toggle" title="Hide/show values">👁</button>
-<div class="container">
-  <h1>P&amp;L — <span class="account">{{ account }}</span>
+{% extends "_base_report.html" %}
+{% block title %}P&amp;L · {{ account }} ({{ method }}){% endblock %}
+{% block footer_meta %}Matching method: {{ method }} · FX-accurate EUR (basis at buy-date rate, proceeds at sell-date rate){% endblock %}
+{% block content %}
+  <h1>P&amp;L, <span class="account">{{ account }}</span>
     <span class="tag">{{ method }}</span>
     <span class="tag">FX-accurate EUR</span>
   </h1>
@@ -278,9 +271,4 @@
     <ul class="muted">{{ sources_list | safe }}</ul>
   </details>
 
-  <footer>Matching method: {{ method }} · FX-accurate EUR (basis at buy-date rate, proceeds at sell-date rate)</footer>
-</div>
-
-<script>{{ js | safe }}</script>
-</body>
-</html>
+{% endblock %}

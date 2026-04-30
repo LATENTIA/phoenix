@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+{#
+  Base layout shared by every Phoenix report (TOB, P&L, CGT, Dividends,
+  Methodology, and any future report). Each report extends this template
+  and overrides the blocks below.
+
+  Blocks (in render order):
+
+    title            : the <title> attribute. Wrap with the "Phoenix · "
+                       prefix automatically; reports just provide the
+                       distinctive part, e.g. "Dividends · personal".
+
+    extra_css        : optional inline <style> block for one-off rules
+                       that don't belong in the shared CSS. Output AFTER
+                       the main injected stylesheet, so it can override.
+
+    privacy_toggle   : the floating 👁 button. Override to hide it (very
+                       rare; almost no report wants this).
+
+    content          : everything inside <div class="container">, between
+                       the privacy toggle and the footer. This is where
+                       the report's H1, KPI cards, tabs, and panels go.
+
+    footer_meta      : the report-specific tail line shown left of the
+                       Latentia attribution in the footer (e.g. "Computed
+                       using FIFO · 10% rate · ..."). Optional.
+
+  Conventions:
+    - Reports MUST set `account` (the human-readable account name) and
+      may set `now` (string) in their context.
+    - Reports MUST receive `css` and `js` from `render_report()`; this
+      base inlines them via {{ css | safe }} and {{ js | safe }}.
+    - The Latentia "Built by" attribution lives ONLY here. Per-report
+      footer text goes through `footer_meta`.
+#}
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Phoenix · {% block title %}Report{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
+  <style>{{ css | safe }}</style>
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+  {% block privacy_toggle %}
+  <button id="privacy-toggle" title="Hide/show values" aria-label="Toggle privacy">👁</button>
+  {% endblock %}
+
+  <div class="container">
+    {% block content %}{% endblock %}
+
+    {#
+      Reports are rendered inside the dashboard iframe, where the dashboard's
+      .app-footer already carries the "Built by Latentia · ... · Commercial
+      licensing on request" line. Duplicating it inside every report would
+      stack two attributions when the user scrolls. So the per-report footer
+      only shows the report-specific meta (formula, FX source, etc.). The
+      legal attribution lives in ONE place: dashboard.html's .app-footer.
+    #}
+    <footer>
+      {% block footer_meta %}{% endblock %}
+    </footer>
+  </div>
+
+  <script>{{ js | safe }}</script>
+</body>
+</html>

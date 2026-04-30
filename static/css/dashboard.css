@@ -104,3 +104,9 @@ button.danger:hover{background:rgba(248,113,113,.12);color:var(--red);border-col
 .toast .spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent-color);
       border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* App footer attribution (subtle) */
+.app-footer{margin:32px 0 8px;text-align:center;color:var(--muted);
+            font-size:.78rem;letter-spacing:.02em}
+.app-footer a{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--border)}
+.app-footer a:hover{color:var(--accent-color);border-bottom-color:var(--accent-color)}

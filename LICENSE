@@ -1,0 +1,67 @@
+Phoenix — Source-Available, Non-Commercial Use License
+========================================================
+
+Copyright (c) 2025–2026 Firas Salmasri / Latentia (https://www.latentia.ai/).
+All rights reserved.
+
+Phoenix is published as source-available software for personal, non-commercial
+use. Anyone may read, run, modify, and redistribute the source code under the
+terms below, but any commercial use requires a separate written agreement
+with the author.
+
+
+1. PERMITTED USES (no licensing fee)
+
+   You may, free of charge:
+   (a) Run Phoenix locally to process your own brokerage statements for your
+       own personal tax filing or personal financial review.
+   (b) Read, study, and modify the source code.
+   (c) Redistribute the source code (modified or unmodified) provided that
+       this LICENSE file, the copyright notice, and the attribution links to
+       https://www.latentia.ai/ are preserved.
+   (d) Submit pull requests, bug reports, and improvements back to the
+       project.
+
+
+2. USES THAT REQUIRE A COMMERCIAL LICENSE
+
+   The following uses are NOT covered by the permitted-use grant above and
+   require a separate commercial agreement with Latentia:
+   (a) Operating Phoenix (or any derivative) as a hosted, paid, or subscription
+       service offered to third parties.
+   (b) Embedding Phoenix (or any derivative) into a paid product, a SaaS
+       offering, or a consultancy deliverable charged to a client.
+   (c) Using Phoenix internally inside a for-profit organisation as part of
+       a paid service to that organisation's clients (accounting firms, family
+       offices, wealth managers, brokerages, etc.).
+   (d) Selling, sub-licensing, or otherwise commercialising Phoenix or any
+       derivative work.
+
+   To obtain a commercial license, contact Latentia at the address listed on
+   https://www.latentia.ai/.
+
+
+3. ATTRIBUTION
+
+   Any redistribution, fork, or derivative must keep the "Built by Latentia"
+   attribution and the link to https://www.latentia.ai/ visible in the user
+   interface and in the README.
+
+
+4. NO WARRANTY
+
+   Phoenix is provided "AS IS", without warranty of any kind, express or
+   implied, including but not limited to warranties of merchantability,
+   fitness for a particular purpose, or non-infringement. The author is not
+   a tax attorney; the output is informational and is not legal or tax
+   advice. The user is responsible for verifying every figure with a
+   qualified accountant before filing any tax return.
+
+   In no event will the author be liable for any claim, damages, or other
+   liability arising from the use of, or inability to use, Phoenix.
+
+
+5. CONTACT
+
+   Commercial licensing inquiries, support, and partnership questions:
+   https://www.latentia.ai/

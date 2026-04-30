@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Phoenix · License</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --border:#334155;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55}
+  .container{max-width:880px;margin:0 auto;padding:32px 28px 64px}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--border)}
+  a:hover{color:var(--text);border-bottom-color:var(--accent)}
+  h1{margin:0 0 4px;font-size:1.6rem}
+  .subtitle{color:var(--muted);font-size:.92rem;margin-bottom:24px}
+  .back{display:inline-block;margin-bottom:8px;color:var(--muted);
+        font-size:.86rem;border:none}
+  .back:hover{color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+        padding:18px 22px;margin:14px 0}
+  .card h2{margin:0 0 6px;font-size:1.05rem;color:var(--accent)}
+  .card p{margin:0;color:var(--muted);font-size:.92rem}
+  pre.license{background:var(--panel-2);border:1px solid var(--border);
+              border-radius:10px;padding:22px 26px;font-size:.86rem;line-height:1.6;
+              color:var(--text);overflow-x:auto;white-space:pre-wrap;
+              font-family:Consolas,Menlo,monospace}
+  .pillrow{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 8px}
+  .pill{display:inline-flex;align-items:center;gap:6px;
+        background:var(--panel-2);border:1px solid var(--border);
+        border-radius:999px;padding:6px 14px;font-size:.86rem;color:var(--text)}
+  .pill.ok{border-color:rgba(74,222,128,.4);color:#86efac}
+  .pill.warn{border-color:rgba(250,204,21,.4);color:#fde68a}
+  footer{margin-top:32px;text-align:center;color:var(--muted);font-size:.78rem}
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back">← Back to dashboard</a>
+  <h1>Phoenix License</h1>
+  <div class="subtitle">
+    Source-available, non-commercial use. Commercial use requires a separate
+    agreement with <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>.
+  </div>
+
+  <div class="card">
+    <h2>TL;DR</h2>
+    <p>
+      You can run Phoenix on your own machine, read the source, modify it, and
+      share your changes for free, as long as you keep the attribution to
+      Latentia. If you want to operate Phoenix as a paid service, embed it in
+      a paid product, or use it inside a for-profit accounting / wealth-management
+      practice, contact us first to license it commercially.
+    </p>
+    <div class="pillrow">
+      <span class="pill ok">✓ Personal tax filing</span>
+      <span class="pill ok">✓ Code review &amp; modification</span>
+      <span class="pill ok">✓ Forks &amp; pull requests</span>
+      <span class="pill warn">! Hosted/paid service: needs license</span>
+      <span class="pill warn">! Use inside a for-profit accountancy: needs license</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Need a commercial license?</h2>
+    <p>
+      Reach out via
+      <a href="https://www.latentia.ai/" target="_blank" rel="noopener">latentia.ai</a>.
+      Pricing depends on scale and use case; we're happy to talk about
+      consultancy embeds, white-label deployments, or per-seat agreements.
+    </p>
+  </div>
+
+  <h2 style="margin-top:32px;font-size:1rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase">Full text</h2>
+  <pre class="license">{{ license_text }}</pre>
+
+  <footer>
+    Built by
+    <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>
+    · This page renders the <code>LICENSE</code> file checked into the repo
+  </footer>
+</div>
+</body>
+</html>

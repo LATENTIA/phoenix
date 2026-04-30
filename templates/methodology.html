@@ -1,10 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Phoenix · Methodology</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-tile.svg"/>
-<style>{{ css | safe }}</style>
+{% extends "_base_report.html" %}
+{% block title %}Methodology{% endblock %}
+{% block privacy_toggle %}{% endblock %}{# Methodology is static prose, no values to blur #}
+{% block extra_css %}
 <style>
   /* Page-specific tweaks on top of the shared dividends styling */
   .methodology h2{margin:28px 0 8px;font-size:1.2rem;color:var(--accent)}
@@ -23,9 +20,10 @@
   .formula{background:var(--panel-2);padding:10px 14px;border-radius:6px;
            font-family:Consolas,Menlo,monospace;font-size:.86rem;margin:8px 0}
 </style>
-</head>
-<body>
-<div class="container methodology">
+{% endblock %}
+{% block footer_meta %}Methodology page · Phoenix · all numbers traceable to <code>data.db</code> and back to the source statements in <code>downloaded/</code>{% endblock %}
+{% block content %}
+<div class="methodology">
   <h1>Methodology</h1>
   <div class="muted">
     A complete description of how Phoenix processes every IBKR statement and
@@ -414,12 +412,5 @@
     </p>
   </section>
 
-  <footer>
-    Methodology page · Phoenix · all numbers traceable to <code>data.db</code>
-    and back to the source statements in <code>downloaded/</code>.
-  </footer>
-</div>
-
-<script>{{ js | safe }}</script>
-</body>
-</html>
+  </div>{# /.methodology #}
+{% endblock %}
