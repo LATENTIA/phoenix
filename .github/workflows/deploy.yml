@@ -141,6 +141,18 @@ jobs:
             "chmod 600 $DEPLOY_DIR/.env.runtime"
           rm .env.runtime.tmp
 
+          # ALSO write a project-root .env file with just the data-dir path.
+          # docker-compose's ${PHOENIX_DATA_DIR:-./phoenix-data} interpolation
+          # at yaml-parse time reads from the shell env or this auto-loaded
+          # .env file — NOT from env_file (.env.runtime). Without this, the
+          # bind mount falls back to ./phoenix-data inside the deploy dir
+          # and the container can't reach /var/phoenix-data.
+          DATA_DIR="${{ secrets.PHOENIX_DATA_DIR }}"
+          DATA_DIR="${DATA_DIR:-/var/phoenix-data}"
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "printf 'PHOENIX_DATA_DIR=%s\n' '$DATA_DIR' > $DEPLOY_DIR/.env && chmod 600 $DEPLOY_DIR/.env"
+
       # ----- 5. Make sure the persistent data dir exists on EC2 -----
       - name: Ensure data directory exists on EC2
         run: |
