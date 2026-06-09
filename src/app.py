@@ -30,12 +30,21 @@ from core import processing
 from core import secrets as phoenix_secrets
 
 
-# Project root = one level above src/ on the host. Inside the Docker container
-# this resolves to "/" (since the Dockerfile copies src/ to /app/), but that
-# doesn't matter because the env vars below are always set in-container.
-# The fallbacks here only kick in for local non-Docker dev, where they should
-# point at the project root next to the .env / LICENSE / phoenix-data/ etc.
-ROOT = Path(__file__).resolve().parent.parent
+# Two anchor paths for the rest of the file:
+#
+#   SRC_DIR : directory containing app.py and the rest of the Python sources.
+#             Host:      <project>/src
+#             Container: /app
+#             Used for: subprocess cwd when invoking ibkr_flex.py.
+#
+#   ROOT    : project root (one level above SRC_DIR on the host).
+#             Host:      <project>
+#             Container: /  (irrelevant; env vars override the data-path
+#                             defaults that depend on ROOT)
+#             Used for: data-path fallbacks (DOWNLOADED_DIR / LOG_DIR /
+#             default DB), LICENSE lookup, legacy-data-detection.
+SRC_DIR = Path(__file__).resolve().parent
+ROOT = SRC_DIR.parent
 
 # All on-disk locations are env-var overridable so containerised / EC2
 # deploys can keep user data outside the project tree (on a mounted volume).
@@ -300,8 +309,11 @@ def run_action(action: str, code: str):
                "--query-id", query_id,
                "--out", str(tmp_out)]
         log.info(f"download: account={account['name']} code={code} (DB credentials)")
+        # cwd=SRC_DIR so the relative script name "ibkr_flex.py" resolves
+        # next to app.py. Using ROOT (project root) would put cwd at "/" in
+        # the container and Python couldn't find the script.
         result = processing.run_subprocess(
-            cmd, cwd=ROOT, env_extra={"IBKR_FLEX_TOKEN": token},
+            cmd, cwd=SRC_DIR, env_extra={"IBKR_FLEX_TOKEN": token},
         )
 
         if result["returncode"] == 0 and tmp_out.exists():
