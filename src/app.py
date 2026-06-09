@@ -143,6 +143,13 @@ app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024     # 1 MB
 app.config["WTF_CSRF_TIME_LIMIT"] = None
 # Don't send the CSRF token in URLs; header-only.
 app.config["WTF_CSRF_HEADERS"] = ["X-CSRFToken"]
+# Re-read Jinja templates from disk on every render. Default (production)
+# behaviour is to cache them after first load, which means edits to any
+# .html file in templates/ are invisible until the container restarts.
+# Re-reads are cheap (the OS file cache absorbs them) and the convenience
+# of seeing template edits immediately is worth it for a single-user app.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 csrf = CSRFProtect(app)
 

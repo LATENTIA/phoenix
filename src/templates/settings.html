@@ -67,16 +67,71 @@
       border-radius:6px;padding:7px 10px;font:inherit;width:300px;max-width:100%}
     .share-tab-checkbox{display:inline-flex;align-items:center;gap:5px;
                         margin:0 12px 6px 0;font-size:.85rem}
-    .share-link-new{margin-top:14px;padding:12px;background:rgba(56,189,248,.08);
-                    border:1px solid var(--accent);border-radius:8px;
-                    font-size:.85rem}
-    .share-link-new code{display:block;background:var(--bg);padding:8px 10px;
-                         border-radius:6px;margin-top:8px;word-break:break-all;
-                         font-size:.78rem;color:var(--text)}
+    /* Explicit button colours for the share-links section. Settings page
+       has no account context, so var(--accent-color) is undefined → the
+       default .primary rule renders as dark-on-dark and is invisible.
+       We force the cyan accent (#38bdf8) on every share button. */
+    .share-card button.primary,
+    .share-url-box button.primary{
+      background:#38bdf8 !important;
+      border-color:#38bdf8 !important;
+      color:#0f172a !important;
+    }
+    .share-card button.primary:hover,
+    .share-url-box button.primary:hover{
+      background:#7dd3fc !important;
+      border-color:#7dd3fc !important;
+      color:#0f172a !important;
+    }
+    .share-card button:not(.primary):not(.danger),
+    .share-url-box button:not(.primary):not(.danger){
+      background:transparent;
+      color:#e2e8f0;
+      border-color:#1f2937;
+    }
+    .share-card button:not(.primary):not(.danger):hover,
+    .share-url-box button:not(.primary):not(.danger):hover{
+      border-color:#38bdf8;
+      color:#38bdf8;
+    }
+
+    /* Modal that shows the newly-generated URL. Lives outside the create
+       form so the form can collapse cleanly before this appears. */
+    .share-url-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);
+                       display:none;align-items:center;justify-content:center;
+                       z-index:1000;padding:20px}
+    .share-url-overlay.show{display:flex}
+    .share-url-box{background:var(--panel);border:1px solid var(--accent);
+                   border-radius:10px;padding:22px 26px;max-width:640px;
+                   width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}
+    .share-url-box h3{margin:0 0 6px;font-size:1.05rem;color:#bae6fd}
+    .share-url-box .desc{color:var(--muted);font-size:.85rem;line-height:1.55;
+                         margin-bottom:14px}
+    .share-url-box code{display:block;background:var(--bg);padding:10px 12px;
+                        border-radius:6px;word-break:break-all;font-size:.82rem;
+                        color:var(--text);border:1px solid var(--border)}
   </style>
 </head>
-<body>
+<body style="--accent-color: var(--accent)">
 <div id="toasts" aria-live="polite"></div>
+
+<!-- Share-link URL modal: shown after a link is generated. Lives outside
+     the settings flow so the create form can fully collapse first. -->
+<div class="share-url-overlay" id="share-url-overlay" role="dialog" aria-modal="true">
+  <div class="share-url-box">
+    <h3>✓ Share link created</h3>
+    <div class="desc">
+      Copy this URL now. Once you close this dialog the full token will no
+      longer be visible in the page (the table only shows the prefix). Anyone
+      with this URL gets view-only access until you revoke or delete the link.
+    </div>
+    <code id="share-url-text"></code>
+    <div class="actions-inline" style="margin-top:14px;justify-content:flex-end">
+      <button onclick="copyShareUrl()">📋 Copy URL</button>
+      <button class="primary" onclick="finishShareCreate()">Done</button>
+    </div>
+  </div>
+</div>
 
 <div class="container">
   <a href="/" class="back-link">← Back to dashboard</a>
@@ -171,12 +226,6 @@
       <div class="actions-inline" style="margin-top:14px">
         <button onclick="cancelShareCreate()">Cancel</button>
         <button class="primary" onclick="doShareCreate()">Generate link</button>
-      </div>
-
-      <div class="share-link-new" id="share-new-link" style="display:none">
-        <strong>✓ Link created.</strong> Copy it now, it will not be shown again in this card.
-        <code id="share-new-link-url"></code>
-        <button onclick="copyShareUrl()" style="margin-top:8px">📋 Copy URL</button>
       </div>
     </div>
 
@@ -380,16 +429,28 @@
   loadFxStatus();
 
   // ----- Share links -----
+  //
+  // Flow:
+  //   1. User opens the create form, fills in tabs/label/expiry, clicks Generate.
+  //   2. On success: the create form COLLAPSES (returns to its closed state)
+  //      and a modal overlay appears with the URL + Copy + Done.
+  //   3. Done closes the modal and reloads the page so the share-links
+  //      table picks up the new row (the table is server-rendered).
   function toggleShareCreateForm() {
-    const f = document.getElementById('share-create-form');
-    f.classList.toggle('show');
-    document.getElementById('share-new-link').style.display = 'none';
+    document.getElementById('share-create-form').classList.toggle('show');
   }
-  function cancelShareCreate() {
+  function collapseShareCreateForm() {
     document.getElementById('share-create-form').classList.remove('show');
     document.getElementById('share-create-label').value = '';
     document.getElementById('share-create-expires').value = '';
-    document.getElementById('share-new-link').style.display = 'none';
+  }
+  function cancelShareCreate() {
+    collapseShareCreateForm();
+  }
+  function finishShareCreate() {
+    document.getElementById('share-url-overlay').classList.remove('show');
+    // Reload so the server-rendered share-links table includes the new row.
+    location.reload();
   }
   async function doShareCreate() {
     const account_code = document.getElementById('share-create-account').value;
@@ -416,9 +477,10 @@
       dismissToast(t);
       if (data.ok) {
         const url = location.origin + '/share/' + data.share.token;
-        document.getElementById('share-new-link-url').textContent = url;
-        document.getElementById('share-new-link').style.display = 'block';
-        toast('Share link generated', {type: 'success', duration: 2200});
+        // Collapse the create form, then pop the URL modal on top.
+        collapseShareCreateForm();
+        document.getElementById('share-url-text').textContent = url;
+        document.getElementById('share-url-overlay').classList.add('show');
       } else {
         toast('Error: ' + (data.errors || []).join('; '), {type: 'error', duration: 5000});
       }
@@ -428,7 +490,7 @@
     }
   }
   function copyShareUrl() {
-    const url = document.getElementById('share-new-link-url').textContent;
+    const url = document.getElementById('share-url-text').textContent;
     navigator.clipboard.writeText(url).then(
       () => toast('URL copied', {type: 'success', duration: 1500}),
       () => toast('Copy failed, select and copy manually', {type: 'error', duration: 3000})

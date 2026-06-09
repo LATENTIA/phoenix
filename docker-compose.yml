@@ -68,6 +68,39 @@ services:
 
     restart: unless-stopped
 
+    # ---------------------------------------------------------------------
+    # Local dev hot-reload (Compose Watch). Active only when you run:
+    #     docker compose watch
+    # Standard `docker compose up` ignores this block.
+    #
+    # Two rules:
+    #   1. templates / static -> sync only (no restart).
+    #      TEMPLATES_AUTO_RELOAD=True in app.py picks up template edits on
+    #      the next request, and static files are served fresh as long as
+    #      the browser does a hard refresh.
+    #   2. everything else under src/ -> sync+restart, so Python code
+    #      changes actually take effect (gunicorn caches imported modules
+    #      and needs to re-exec to see them).
+    #
+    # Path matching is glob-style. The src tree maps 1:1 onto /app in the
+    # container (the Dockerfile does `COPY src /app`).
+    develop:
+      watch:
+        - path: ./src/templates
+          target: /app/templates
+          action: sync
+        - path: ./src/static
+          target: /app/static
+          action: sync
+        - path: ./src
+          target: /app
+          action: sync+restart
+          ignore:
+            - "**/__pycache__/**"
+            - "**/*.pyc"
+            - "templates/**"
+            - "static/**"
+
 
   # -------------------------------------------------------------------------
   # Caddy reverse proxy — HTTPS termination + auto Let's Encrypt cert.
