@@ -245,6 +245,64 @@ def _handle_exception(e):
     )
 
 
+# ---------- Background ECB EUR/USD weekly auto-refresh ----------
+# Runs in a daemon thread inside the Flask process. Single gunicorn worker
+# (we enforce GUNICORN_WORKERS=1) so there's only one scheduler instance.
+# If you ever scale to multiple workers, move this to a sidecar container
+# or use a distributed scheduler (apscheduler + sqlalchemy job store).
+def _start_fx_scheduler() -> None:
+    """Schedule a weekly incremental ECB rate sync, plus a 30-second
+    delayed kickoff so the first refresh happens automatically on every
+    container start (catches up missed weeks after downtime)."""
+    if os.environ.get("PHOENIX_DISABLE_SCHEDULER") == "1":
+        log.info("scheduler: disabled via PHOENIX_DISABLE_SCHEDULER=1")
+        return
+
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.date import DateTrigger
+        from datetime import timedelta
+        from core import ecb_fx_parser
+    except ImportError as e:
+        log.warning(f"scheduler: apscheduler not installed ({e}); FX won't auto-refresh. "
+                    "Run `pip install -r requirements.txt` to enable.")
+        return
+
+    def _run_fx_sync() -> None:
+        try:
+            conn = db.connect()
+            db.init_schema(conn)
+            result = ecb_fx_parser.sync_to_db_incremental(conn)
+            conn.close()
+            log.info(f"fx-scheduler: {result}")
+        except Exception as e:
+            log.error(f"fx-scheduler: FAILED {type(e).__name__}: {e}")
+
+    scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
+    # Weekly cadence: Monday 06:00 UTC. ECB publishes daily rates ~16:00 CET
+    # (15:00 UTC) on business days, so 06:00 UTC Monday gets us the previous
+    # week + Friday's rate cleanly.
+    scheduler.add_job(
+        _run_fx_sync,
+        trigger=CronTrigger(day_of_week="mon", hour=6, minute=0),
+        id="ecb_fx_weekly",
+        replace_existing=True,
+        misfire_grace_time=24 * 3600,   # if container was off, run within 24h of next boot
+    )
+    # Startup catch-up: 30 seconds after boot so we don't compete with the
+    # other init steps. Runs once.
+    from datetime import datetime as _dt
+    scheduler.add_job(
+        _run_fx_sync,
+        trigger=DateTrigger(run_date=_dt.utcnow() + timedelta(seconds=30)),
+        id="ecb_fx_startup_catchup",
+        replace_existing=True,
+    )
+    scheduler.start()
+    log.info("fx-scheduler: started (weekly Mon 06:00 UTC + startup catch-up in 30s)")
+
+
 # Ensure the DB schema exists (creates an empty data.db on first run).
 # Population happens only when the user clicks "Load data".
 def _bootstrap_db():
@@ -259,6 +317,7 @@ def _bootstrap_db():
 
 
 _bootstrap_db()
+_start_fx_scheduler()
 
 
 # ---------- helpers ----------
@@ -451,6 +510,147 @@ def db_status():
     return jsonify(s)
 
 
+# ---------------------------------------------------------------------------
+# Manual trade entry. Users add stocks / crypto the engine doesn't ingest
+# automatically (off-IBKR trades, manual corrections, etc.). Stored with
+# is_manual=1 so they survive re-ingest and can be deleted later.
+# ---------------------------------------------------------------------------
+
+@app.route("/trades/manual", methods=["POST"])
+@limiter.limit("30 per minute")
+def trades_manual_add():
+    """Create a manual trade row. Body (JSON):
+
+      {
+        "account_code": "P",           # required
+        "symbol": "BTC",               # required, will be UPPER'd
+        "asset_class": "stock"|"crypto",
+        "trade_date": "YYYY-MM-DD",
+        "side": "buy"|"sell",
+        "quantity": 0.5,               # always positive — sign comes from `side`
+        "price": 62000.00,
+        "currency": "USD",
+        "commission": 0.0,             # optional, defaults 0
+        "description": "..."           # optional
+      }
+    """
+    data = request.get_json(silent=True) or {}
+
+    # Pull + sanitise. Don't trust the client.
+    account_code = (data.get("account_code") or "").strip().upper()
+    symbol = (data.get("symbol") or "").strip().upper()
+    asset_class = (data.get("asset_class") or "").strip().lower()
+    trade_date = (data.get("trade_date") or "").strip()
+    side = (data.get("side") or "").strip().lower()
+    currency = (data.get("currency") or "USD").strip().upper()
+    description = (data.get("description") or "").strip()[:200]   # cap length
+
+    # Validate enums.
+    errors = []
+    if not account_code:
+        errors.append("account_code is required")
+    if not symbol or len(symbol) > 12 or not symbol.replace(".", "").replace("-", "").isalnum():
+        errors.append("symbol must be 1-12 alphanumeric chars (dot/dash ok)")
+    if asset_class not in ("stock", "crypto"):
+        errors.append("asset_class must be 'stock' or 'crypto'")
+    if side not in ("buy", "sell"):
+        errors.append("side must be 'buy' or 'sell'")
+    try:
+        datetime.strptime(trade_date, "%Y-%m-%d")
+    except ValueError:
+        errors.append("trade_date must be YYYY-MM-DD")
+    if not currency.isalpha() or len(currency) != 3:
+        errors.append("currency must be a 3-letter ISO code (USD, EUR, GBP, ...)")
+
+    # Numeric fields.
+    try:
+        quantity = float(data.get("quantity") or 0)
+        if quantity <= 0:
+            errors.append("quantity must be > 0")
+    except (TypeError, ValueError):
+        errors.append("quantity must be a number"); quantity = 0
+    try:
+        price = float(data.get("price") or 0)
+        if price < 0:
+            errors.append("price cannot be negative")
+    except (TypeError, ValueError):
+        errors.append("price must be a number"); price = 0
+    try:
+        commission = float(data.get("commission") or 0)
+        if commission < 0:
+            errors.append("commission cannot be negative")
+    except (TypeError, ValueError):
+        errors.append("commission must be a number"); commission = 0
+
+    if errors:
+        return jsonify({"ok": False, "errors": errors}), 400
+
+    # Confirm the account exists before we insert (also catches typos).
+    accs = account_service.get_accounts()
+    if account_code not in accs:
+        return jsonify({"ok": False, "errors": [f"unknown account_code {account_code!r}"]}), 400
+
+    conn = db.connect()
+    db.init_schema(conn)
+    try:
+        trade_id = db.insert_manual_trade(
+            conn,
+            account_code=account_code,
+            symbol=symbol,
+            asset_class=asset_class,
+            trade_date=trade_date,
+            side=side,
+            quantity=quantity,
+            price=price,
+            currency=currency,
+            commission=commission,
+            description=description,
+        )
+    except ValueError as e:
+        conn.close()
+        return jsonify({"ok": False, "errors": [str(e)]}), 400
+    conn.close()
+    log.info(f"trades/manual: added id={trade_id} {side} {quantity} {symbol} @ {price} {currency} for {account_code}")
+    return jsonify({"ok": True, "trade_id": trade_id})
+
+
+@app.route("/trades/manual/<int:trade_id>", methods=["DELETE"])
+@limiter.limit("30 per minute")
+def trades_manual_delete(trade_id: int):
+    """Delete a manual trade. account_code is required as a safety check —
+    you can only delete trades within the account you specify, and only if
+    is_manual=1 (IBKR-imported rows are off-limits)."""
+    account_code = (request.args.get("account") or "").strip().upper()
+    if not account_code:
+        return jsonify({"ok": False, "error": "missing ?account=<code>"}), 400
+
+    conn = db.connect()
+    db.init_schema(conn)
+    deleted = db.delete_manual_trade(conn, trade_id=trade_id, account_code=account_code)
+    conn.close()
+    if not deleted:
+        return jsonify({
+            "ok": False,
+            "error": "trade not found, not manual, or belongs to a different account",
+        }), 404
+    log.info(f"trades/manual: deleted id={trade_id} from {account_code}")
+    return jsonify({"ok": True, "trade_id": trade_id})
+
+
+@app.route("/trades/manual", methods=["GET"])
+@limiter.limit("60 per minute")
+def trades_manual_list():
+    """List all manual trades for one account (used by the dashboard)."""
+    account_code = (request.args.get("account") or "").strip().upper()
+    if not account_code:
+        return jsonify({"ok": False, "error": "missing ?account=<code>"}), 400
+    conn = db.connect()
+    db.init_schema(conn)
+    rows = db.list_manual_trades(conn, account_code).to_dict("records")
+    conn.close()
+    return jsonify({"ok": True, "rows": rows})
+
+
 @app.route("/accounts", methods=["GET"])
 def accounts_list():
     """JSON list of all accounts (tokens redacted)."""
@@ -589,6 +789,61 @@ def report(kind: str, account: str):
         raise
     log.info(f"report: rendered kind={kind} account={account} bytes={len(html)} in {(datetime.now()-start).total_seconds():.2f}s")
     return Response(html, mimetype="text/html; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
+# FX rate maintenance (ECB EUR/USD reference rates).
+# ---------------------------------------------------------------------------
+# These two routes back the Settings page's FX section. The scheduled job
+# below also calls into the same sync function so manual + automatic paths
+# share one code path.
+
+@app.route("/fx/status")
+@limiter.limit("60 per minute")
+def fx_status():
+    """Return the latest date in fx_rates and the total row count."""
+    conn = db.connect()
+    db.init_schema(conn)
+    row = conn.execute("SELECT MAX(date), COUNT(*) FROM fx_rates").fetchone()
+    conn.close()
+    return jsonify({"max_date": row[0], "row_count": row[1] or 0})
+
+
+@app.route("/fx/refresh", methods=["POST"])
+@limiter.limit("10 per minute")
+def fx_refresh():
+    """Manually trigger an incremental ECB EUR/USD sync. Idempotent — safe
+    to call repeatedly. The scheduled weekly job calls the same underlying
+    function."""
+    from core import ecb_fx_parser
+    conn = db.connect()
+    db.init_schema(conn)
+    try:
+        result = ecb_fx_parser.sync_to_db_incremental(conn)
+        conn.close()
+        log.info(f"fx/refresh: {result}")
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        conn.close()
+        log.error(f"fx/refresh FAILED: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/settings")
+def settings_page():
+    """Settings page hosting destructive operations (delete account, empty DB)
+    and maintenance actions (refresh FX rates). Moved off the dashboard so
+    these ops aren't one mis-click away."""
+    accs = account_service.get_accounts()
+    statuses = {
+        a["name"]: account_service.report_status(a["name"], downloaded_dir=DOWNLOADED_DIR)
+        for a in accs.values()
+    }
+    return render_template(
+        "settings.html",
+        accounts_full=accs,
+        statuses=statuses,
+    )
 
 
 @app.route("/license")

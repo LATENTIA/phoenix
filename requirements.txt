@@ -15,3 +15,9 @@ boto3>=1.34             # AWS Secrets Manager client for Flex tokens
 # POSIX-only (depends on os.fork). `pip install` will succeed on Windows but
 # the binary won't run there.
 gunicorn>=22.0
+
+# In-app scheduler for the weekly ECB EUR/USD rate refresh (and any future
+# periodic jobs). BackgroundScheduler runs in a thread inside the Flask
+# process — fine because we run a single gunicorn worker (multiple workers
+# would each schedule the job, leading to duplicate fetches).
+apscheduler>=3.10

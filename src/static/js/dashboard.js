@@ -163,30 +163,49 @@ async function submitAddAccount(ev) {
   }
 }
 
-// ---------- Delete account ----------
-async function confirmDeleteAccount(id, name) {
-  if (!confirm(
-    `Delete account "${name}"?\n\n` +
-    `This wipes all of its trades, corporate actions, transfers, and open-position\n` +
-    `snapshots from the database. The "downloaded/${name}/" folder is KEPT — your\n` +
-    `XML/CSV files remain so you can re-create the account or move them elsewhere.`
-  )) return;
-  const t = toast(`Deleting "${name}"...`, {spin: true, duration: 0});
+// ---------- Add manual trade ----------
+function openAddManualTrade(accountCode) {
+  const overlay = document.getElementById('add-manual-trade-overlay');
+  const form = document.getElementById('add-manual-trade-form');
+  form.reset();
+  // Pre-fill account code (hidden field) and today's date.
+  form.querySelector('[name="account_code"]').value = accountCode;
+  form.querySelector('[name="trade_date"]').value = new Date().toISOString().slice(0, 10);
+  form.querySelector('[name="currency"]').value = 'USD';
+  overlay.classList.add('show');
+  form.querySelector('[name="symbol"]').focus();
+}
+
+function closeAddManualTrade() {
+  document.getElementById('add-manual-trade-overlay').classList.remove('show');
+}
+
+async function submitManualTrade(ev) {
+  ev.preventDefault();
+  const form = document.getElementById('add-manual-trade-form');
+  const data = Object.fromEntries(new FormData(form).entries());
+  // Coerce numerics — FormData gives us strings only.
+  data.quantity = parseFloat(data.quantity);
+  data.price = parseFloat(data.price);
+  data.commission = parseFloat(data.commission || '0');
+  const t = toast('Adding trade...', {spin: true, duration: 0});
   try {
-    const res = await fetchCsrf('/accounts/' + id, { method: 'DELETE' });
-    const data = await res.json();
+    const res = await fetchCsrf('/trades/manual', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
     dismissToast(t);
-    if (data.ok) {
-      const c = data.counts;
-      toast(`Account "${data.name}" deleted (${c.trades} trades, ${c.source_files} sources). Folder kept.`,
-            {type: 'success', duration: 3500});
-      const url = new URL(location.href);
-      if (url.searchParams.get('account') === data.name) {
-        url.searchParams.delete('account');
-      }
-      setTimeout(() => location.href = url.pathname + url.search, 800);
+    if (result.ok) {
+      closeAddManualTrade();
+      toast(`Added ${data.side} ${data.quantity} ${data.symbol} (manual, id=${result.trade_id})`,
+            {type: 'success', duration: 3000});
+      // Refresh the active report so the new trade appears.
+      setTimeout(() => refreshActiveReport(), 600);
     } else {
-      toast('Delete failed: ' + (data.error || 'unknown'), {type: 'error', duration: 4000});
+      const msg = (result.errors || [result.error || 'unknown']).join('; ');
+      toast('Error: ' + msg, {type: 'error', duration: 5000});
     }
   } catch (e) {
     dismissToast(t);
@@ -194,40 +213,10 @@ async function confirmDeleteAccount(id, name) {
   }
 }
 
-// ---------- Empty DB (with type-to-confirm dialog) ----------
-function resetDb() {
-  const overlay = document.getElementById('confirm-overlay');
-  const input = document.getElementById('confirm-input');
-  const go = document.getElementById('confirm-go');
-  input.value = '';
-  go.disabled = true;
-  overlay.classList.add('show');
-  input.focus();
-  input.oninput = () => { go.disabled = (input.value.trim() !== 'DELETE'); };
-  input.onkeydown = (e) => { if (e.key === 'Escape') closeConfirm(); };
-}
-function closeConfirm() {
-  document.getElementById('confirm-overlay').classList.remove('show');
-}
-async function doReset() {
-  closeConfirm();
-  const t = toast('Wiping database...', {spin: true, duration: 0});
-  try {
-    const res = await fetchCsrf('/db/reset', { method: 'POST' });
-    const data = await res.json();
-    dismissToast(t);
-    if (data.ok) {
-      const d = data.deleted;
-      toast(`Database emptied: ${d.trades} trades, ${d.source_files} sources`, {type: 'success', duration: 2500});
-      setTimeout(() => location.reload(), 800);
-    } else {
-      toast('Reset failed', {type: 'error', duration: 4000});
-    }
-  } catch (e) {
-    dismissToast(t);
-    toast('Network error: ' + e.message, {type: 'error', duration: 4000});
-  }
-}
+// Destructive operations (delete account, empty DB) have moved to /settings
+// to put them one navigation step away from accidental clicks. The settings
+// page handles its own typed-confirmation flow with the helpers below
+// (fetchCsrf, toast).
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', () => {

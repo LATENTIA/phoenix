@@ -146,6 +146,58 @@ def get_eur_usd_rate_for_day(target_date: str) -> Optional[float]:
     return _load_ecb_history().get(target_date)
 
 
+def sync_to_db_incremental(conn) -> dict:
+    """Fetch fresh ECB rates and insert only the dates not already in
+    `fx_rates`. Idempotent and safe to run repeatedly. Returns:
+
+        {"max_before": str|None, "max_after": str, "row_count": int,
+         "new_rows": int, "fetched": int}
+
+    Designed for the weekly scheduler + the /fx/refresh route.
+
+    Why incremental: the ECB ZIP is small (~50 KB) but we don't want to
+    rewrite 7000 rows of the fx_rates table every week.
+    """
+    # 1. What's the latest date we already have in DB?
+    row = conn.execute("SELECT MAX(date), COUNT(*) FROM fx_rates").fetchone()
+    max_before, count_before = (row[0], row[1]) if row else (None, 0)
+
+    # 2. Fetch full ECB history (cheap — small ZIP).
+    rates = _download_ecb_history()
+
+    # 3. Filter to NEW dates only.
+    if max_before:
+        new_rates = {d: r for d, r in rates.items() if d > max_before}
+    else:
+        new_rates = rates
+
+    # 4. Insert (INSERT OR IGNORE so a re-run is a no-op).
+    if new_rates:
+        conn.executemany(
+            "INSERT OR IGNORE INTO fx_rates (date, eur_usd) VALUES (?, ?)",
+            [(d, float(r)) for d, r in new_rates.items()],
+        )
+        conn.commit()
+
+    # 5. Refresh the in-process cache so subsequent rate lookups see the new
+    # data without restarting the process. We also rewrite the local CSV so
+    # the file stays in sync (used as a fallback if the DB is wiped).
+    _save_local_cache(rates)
+    _load_ecb_history.cache_clear()
+
+    # 6. Re-query for the up-to-date count + max.
+    row = conn.execute("SELECT MAX(date), COUNT(*) FROM fx_rates").fetchone()
+    max_after, count_after = (row[0], row[1]) if row else (None, 0)
+
+    return {
+        "max_before": max_before,
+        "max_after": max_after,
+        "row_count": count_after,
+        "new_rows": count_after - count_before,
+        "fetched": len(rates),
+    }
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "refresh":

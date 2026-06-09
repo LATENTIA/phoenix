@@ -65,26 +65,78 @@
   </div>
 </div>
 
-<!-- Empty-DB confirm dialog -->
-<div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true">
-  <div class="confirm-box">
-    <h2>⚠ Empty the database?</h2>
-    <p>
-      This wipes <strong>every</strong> trade, corporate action, transfer, open-position
-      snapshot and FX rate from <code>data.db</code>. The downloaded CSV/XML files in
-      <code>downloaded/</code> are <em>not</em> touched — you can re-ingest them by
-      clicking <strong>Load data</strong> afterwards.
+<!-- Add manual trade modal -->
+<div id="add-manual-trade-overlay" class="overlay" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <h2>Add manual trade</h2>
+    <p class="muted" style="margin:0 0 14px;font-size:.85rem">
+      Use this for trades that didn't come from IBKR (crypto exchanges,
+      paper-trading corrections, family-account moves you want to track here, etc.).
+      Manual rows are flagged in the engine and can be deleted later from the
+      <em>Manual trades</em> tab.
     </p>
-    <p class="muted" style="font-size:.8rem">Type <code>DELETE</code> to confirm:</p>
-    <input type="text" id="confirm-input" autocomplete="off"
-           style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
-                  border-radius:6px;padding:8px 10px;font:inherit;margin-bottom:12px"/>
-    <div class="actions">
-      <button onclick="closeConfirm()">Cancel</button>
-      <button class="danger" id="confirm-go" disabled onclick="doReset()">Yes, wipe it</button>
-    </div>
+    <form id="add-manual-trade-form" onsubmit="submitManualTrade(event)">
+      <input type="hidden" name="account_code" id="manual-trade-account-code"/>
+
+      <label class="field">
+        <span>Asset class</span>
+        <select name="asset_class" required>
+          <option value="stock">Stock</option>
+          <option value="crypto">Crypto</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Symbol <span class="muted">(ticker, e.g. AAPL, BTC, ETH)</span></span>
+        <input name="symbol" required pattern="[A-Za-z0-9.\-]{1,12}" placeholder="BTC" autocomplete="off"/>
+      </label>
+
+      <label class="field">
+        <span>Side</span>
+        <select name="side" required>
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Date <span class="muted">(YYYY-MM-DD)</span></span>
+        <input name="trade_date" type="date" required/>
+      </label>
+
+      <label class="field">
+        <span>Quantity</span>
+        <input name="quantity" type="number" step="any" min="0" required placeholder="0.5"/>
+      </label>
+
+      <label class="field">
+        <span>Price per unit</span>
+        <input name="price" type="number" step="any" min="0" required placeholder="62000.00"/>
+      </label>
+
+      <label class="field">
+        <span>Currency <span class="muted">(3-letter ISO)</span></span>
+        <input name="currency" required pattern="[A-Za-z]{3}" maxlength="3" value="USD"/>
+      </label>
+
+      <label class="field">
+        <span>Commission <span class="muted">(optional)</span></span>
+        <input name="commission" type="number" step="any" min="0" value="0"/>
+      </label>
+
+      <label class="field">
+        <span>Description <span class="muted">(optional)</span></span>
+        <input name="description" maxlength="200" placeholder="Kraken — limit order"/>
+      </label>
+
+      <div class="actions">
+        <button type="button" onclick="closeAddManualTrade()">Cancel</button>
+        <button type="submit" class="primary">Add trade</button>
+      </div>
+    </form>
   </div>
 </div>
+
 
 <div class="container">
   <div class="topbar">
@@ -104,12 +156,12 @@
              title="{{ t }} account">
             <span class="dot"></span>{{ name|capitalize }}
           </a>
-          <button class="pill-close" onclick="confirmDeleteAccount({{ acc.id }}, '{{ name }}')"
-                  title="Delete this account">×</button>
         </span>
       {% endfor %}
       <a href="#" onclick="openAddAccount();return false" title="Add new account"
          style="color:var(--muted);padding:6px 12px;font-weight:600">＋</a>
+      <a href="/settings" title="Account management + destructive operations"
+         style="color:var(--muted);padding:6px 12px;font-weight:600">⚙</a>
     </div>
   </div>
 
@@ -119,8 +171,9 @@
       <button class="primary" onclick="loadData('{{ current_code }}')">⚡ Load data</button>
       <span class="muted" style="margin-left:8px">Download → ingest into DB → regenerate TOB &amp; P&amp;L</span>
       <span style="flex:1"></span>
+      <button onclick="openAddManualTrade('{{ current_code }}')"
+              title="Add a stock or crypto trade that didn't come from IBKR">➕ Add manual trade</button>
       <button onclick="fetchMarks('{{ current_code }}')" title="Fetch 2025-12-31 closing prices from Yahoo for the Belgian CGT basis reset">📊 Refresh year-end marks</button>
-      <button class="danger" onclick="resetDb()">🗑 Empty DB</button>
     </div>
     <div class="meta">
       Last ingest:

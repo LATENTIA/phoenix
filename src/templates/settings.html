@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="csrf-token" content="{{ csrf_token() }}"/>
+  <title>Phoenix · Settings</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+  <style>
+    .danger-card{background:var(--panel);border:1px solid var(--border);
+                 border-left:3px solid var(--red);border-radius:10px;
+                 padding:18px 22px;margin:16px 0}
+    .danger-card h3{margin:0 0 6px;color:var(--red);font-size:1rem}
+    .danger-card .desc{color:var(--muted);font-size:.88rem;margin-bottom:14px;line-height:1.55}
+    .danger-card .confirm-block{display:none;margin-top:14px;
+                                padding:14px;background:var(--bg);
+                                border:1px dashed var(--red);border-radius:8px}
+    .danger-card .confirm-block.show{display:block}
+    .danger-card input[type="text"]{
+       background:var(--bg);color:var(--text);border:1px solid var(--border);
+       border-radius:6px;padding:8px 10px;font:inherit;
+       width:280px;max-width:100%}
+    .accounts-table{width:100%;border-collapse:collapse;font-size:.88rem;
+                    background:var(--panel);border:1px solid var(--border);
+                    border-radius:10px;overflow:hidden}
+    .accounts-table th{background:var(--panel-2);color:var(--muted);
+                       padding:10px 12px;text-align:left;
+                       text-transform:uppercase;font-size:.72rem;letter-spacing:.05em}
+    .accounts-table td{padding:10px 12px;border-top:1px solid var(--border)}
+    .accounts-table tr:first-child td{border-top:none}
+    .actions-inline{display:flex;gap:8px;flex-wrap:wrap}
+    .back-link{display:inline-block;margin:0 0 16px;color:var(--muted);font-size:.88rem;text-decoration:none}
+    .back-link:hover{color:var(--accent)}
+    .info-line{color:var(--muted);font-size:.88rem;line-height:1.55;margin:8px 0}
+    .info-line code{background:var(--panel-2);padding:1px 6px;border-radius:4px;color:var(--text)}
+  </style>
+</head>
+<body>
+<div id="toasts" aria-live="polite"></div>
+
+<div class="container">
+  <a href="/" class="back-link">← Back to dashboard</a>
+  <h1 style="margin:0 0 4px">⚙ Settings</h1>
+  <p class="info-line">Destructive operations live here so they're one navigation step away from accidental clicks.</p>
+
+  <h2 style="margin:24px 0 8px;font-size:1.1rem">Accounts</h2>
+  <div class="info-line">
+    Click an account name to switch to it. To delete one, scroll to <em>Delete account</em> below.
+  </div>
+  <div class="table-wrap">
+    <table class="accounts-table">
+      <thead><tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Code</th>
+        <th>Folder</th>
+        <th>Last ingest</th>
+      </tr></thead>
+      <tbody>
+      {% for code, acc in accounts_full.items() %}
+        <tr>
+          <td><a href="/?account={{ acc.name }}" style="color:var(--accent);text-decoration:none">{{ acc.name }}</a></td>
+          <td>{{ acc.type }}</td>
+          <td><code>{{ code }}</code></td>
+          <td><code>downloaded/{{ acc.name }}/</code></td>
+          <td>{{ statuses[acc.name].last_ingest.mtime if statuses[acc.name].last_ingest else 'never' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 style="margin:24px 0 8px;font-size:1.1rem">Maintenance</h2>
+
+  <!-- FX refresh -->
+  <div class="card" style="padding:18px 22px">
+    <h3 style="margin:0 0 4px;font-size:1rem">📈 ECB EUR/USD rates</h3>
+    <div class="info-line">
+      Rates auto-refresh weekly while the app is running. Last DB date:
+      <code id="fx-last-date">loading...</code> · Rate count:
+      <code id="fx-row-count">loading...</code>.
+    </div>
+    <button onclick="refreshFxRates()">↻ Refresh FX rates now</button>
+  </div>
+
+  <h2 style="margin:24px 0 8px;font-size:1.1rem;color:var(--red)">⚠ Destructive operations</h2>
+
+  {% for code, acc in accounts_full.items() %}
+  <!-- Delete account: one card per account -->
+  <div class="danger-card">
+    <h3>🗑 Delete account: {{ acc.name }}</h3>
+    <div class="desc">
+      Removes the account <strong>{{ acc.name }}</strong> ({{ acc.type }}, code <code>{{ code }}</code>)
+      and all of its trades, corporate actions, transfers, open positions,
+      dividends, and withholding-tax rows. The downloaded CSV/XML files
+      under <code>downloaded/{{ acc.name }}/</code> are NOT touched.
+    </div>
+    <button class="danger" onclick="startDeleteAccount({{ acc.id }}, '{{ acc.name }}')">Delete account...</button>
+    <div class="confirm-block" id="confirm-account-{{ acc.id }}">
+      <div class="info-line" style="color:var(--text)">
+        Type the account name <code>{{ acc.name }}</code> to confirm:
+      </div>
+      <input type="text" id="confirm-input-{{ acc.id }}" autocomplete="off"
+             oninput="updateAccountConfirm({{ acc.id }}, '{{ acc.name }}')"/>
+      <div class="actions-inline" style="margin-top:10px">
+        <button onclick="cancelDeleteAccount({{ acc.id }})">Cancel</button>
+        <button class="danger" id="confirm-account-go-{{ acc.id }}" disabled
+                onclick="doDeleteAccount({{ acc.id }}, '{{ acc.name }}')">
+          Yes, delete {{ acc.name }}
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Empty database -->
+  <div class="danger-card">
+    <h3>🔥 Empty database</h3>
+    <div class="desc">
+      Wipes <strong>every</strong> trade, corporate action, transfer, open-position
+      snapshot, dividend, withholding-tax row, and FX rate from <code>data.db</code>
+      across <strong>all</strong> accounts.
+      <br><br>
+      Accounts themselves are kept. The downloaded CSV/XML files under
+      <code>downloaded/</code> are <em>not</em> touched — you can re-ingest them
+      by clicking <strong>Load data</strong> on the dashboard.
+      <br><br>
+      <strong>This cannot be undone.</strong>
+    </div>
+    <button class="danger" onclick="startEmptyDb()">Empty database...</button>
+    <div class="confirm-block" id="confirm-empty-db">
+      <div class="info-line" style="color:var(--text)">
+        Type <code>DELETE</code> (uppercase) to confirm:
+      </div>
+      <input type="text" id="confirm-empty-input" autocomplete="off"
+             oninput="updateEmptyDbConfirm()"/>
+      <div class="actions-inline" style="margin-top:10px">
+        <button onclick="cancelEmptyDb()">Cancel</button>
+        <button class="danger" id="confirm-empty-go" disabled onclick="doEmptyDb()">
+          Yes, wipe everything
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    Built by
+    <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>
+    · <a href="/license">Free for personal, non-commercial use</a>
+    · <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Commercial licensing on request</a>
+  </footer>
+</div>
+
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script>
+  // ----- Confirmation flows -----
+  function startEmptyDb()  { document.getElementById('confirm-empty-db').classList.add('show'); document.getElementById('confirm-empty-input').focus(); }
+  function cancelEmptyDb() { document.getElementById('confirm-empty-db').classList.remove('show'); document.getElementById('confirm-empty-input').value=''; document.getElementById('confirm-empty-go').disabled=true; }
+  function updateEmptyDbConfirm() {
+    document.getElementById('confirm-empty-go').disabled =
+      document.getElementById('confirm-empty-input').value !== 'DELETE';
+  }
+  async function doEmptyDb() {
+    const t = toast('Wiping database...', {spin: true, duration: 0});
+    try {
+      const res  = await fetchCsrf('/db/reset', {method:'POST'});
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast('Database wiped — accounts preserved. Reloading...', {type:'success', duration:2200});
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        toast('Error: ' + (data.error || 'unknown'), {type:'error', duration:5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type:'error', duration:4000});
+    }
+  }
+
+  function startDeleteAccount(id, name)  {
+    document.getElementById('confirm-account-' + id).classList.add('show');
+    document.getElementById('confirm-input-' + id).focus();
+  }
+  function cancelDeleteAccount(id) {
+    document.getElementById('confirm-account-' + id).classList.remove('show');
+    document.getElementById('confirm-input-' + id).value = '';
+    document.getElementById('confirm-account-go-' + id).disabled = true;
+  }
+  function updateAccountConfirm(id, name) {
+    document.getElementById('confirm-account-go-' + id).disabled =
+      document.getElementById('confirm-input-' + id).value !== name;
+  }
+  async function doDeleteAccount(id, name) {
+    const t = toast(`Deleting account ${name}...`, {spin: true, duration: 0});
+    try {
+      const res  = await fetchCsrf('/accounts/' + id, {method:'DELETE'});
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast(`Account "${name}" deleted. Reloading...`, {type:'success', duration:2200});
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        toast('Error: ' + (data.error || 'unknown'), {type:'error', duration:5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type:'error', duration:4000});
+    }
+  }
+
+  // ----- FX rate refresh -----
+  async function loadFxStatus() {
+    try {
+      const res = await fetch('/fx/status');
+      const d = await res.json();
+      document.getElementById('fx-last-date').textContent = d.max_date || '(no rates yet)';
+      document.getElementById('fx-row-count').textContent = d.row_count;
+    } catch (e) { /* silent */ }
+  }
+  async function refreshFxRates() {
+    const t = toast('Fetching ECB rates...', {spin: true, duration: 0});
+    try {
+      const res  = await fetchCsrf('/fx/refresh', {method:'POST'});
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast(`FX refreshed: +${data.new_rows} new (total ${data.row_count})`, {type:'success', duration:3000});
+        loadFxStatus();
+      } else {
+        toast('Error: ' + (data.error || 'unknown'), {type:'error', duration:5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type:'error', duration:4000});
+    }
+  }
+  loadFxStatus();
+</script>
+</body>
+</html>
