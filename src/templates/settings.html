@@ -33,6 +33,46 @@
     .back-link:hover{color:var(--accent)}
     .info-line{color:var(--muted);font-size:.88rem;line-height:1.55;margin:8px 0}
     .info-line code{background:var(--panel-2);padding:1px 6px;border-radius:4px;color:var(--text)}
+
+    /* Share-links section */
+    .share-card{background:var(--panel);border:1px solid var(--border);
+                border-radius:10px;padding:18px 22px;margin:16px 0}
+    .share-card h3{margin:0 0 6px;font-size:1rem}
+    .share-table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:14px}
+    .share-table th{background:var(--panel-2);color:var(--muted);padding:8px 10px;
+                    text-align:left;text-transform:uppercase;font-size:.7rem;
+                    letter-spacing:.05em;border-bottom:1px solid var(--border)}
+    .share-table td{padding:8px 10px;border-top:1px solid var(--border);
+                    vertical-align:middle}
+    .share-table tr.revoked td{opacity:.5;text-decoration:line-through}
+    .share-table tr.revoked td.actions{text-decoration:none;opacity:1}
+    .share-token-cell{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                      font-size:.78rem;color:var(--muted);
+                      max-width:280px;overflow:hidden;text-overflow:ellipsis;
+                      white-space:nowrap}
+    .share-tab-pill{display:inline-block;padding:1px 7px;border-radius:10px;
+                    background:var(--panel-2);color:var(--text);font-size:.72rem;
+                    margin:0 3px 2px 0}
+    .share-create-form{display:none;margin-top:14px;padding:14px;
+                       background:var(--bg);border:1px dashed var(--accent);
+                       border-radius:8px}
+    .share-create-form.show{display:block}
+    .share-create-form label{display:block;margin:8px 0}
+    .share-create-form label > span{display:block;font-size:.8rem;color:var(--muted);
+                                    margin-bottom:4px}
+    .share-create-form input[type="text"],
+    .share-create-form input[type="number"],
+    .share-create-form select{
+      background:var(--bg);color:var(--text);border:1px solid var(--border);
+      border-radius:6px;padding:7px 10px;font:inherit;width:300px;max-width:100%}
+    .share-tab-checkbox{display:inline-flex;align-items:center;gap:5px;
+                        margin:0 12px 6px 0;font-size:.85rem}
+    .share-link-new{margin-top:14px;padding:12px;background:rgba(56,189,248,.08);
+                    border:1px solid var(--accent);border-radius:8px;
+                    font-size:.85rem}
+    .share-link-new code{display:block;background:var(--bg);padding:8px 10px;
+                         border-radius:6px;margin-top:8px;word-break:break-all;
+                         font-size:.78rem;color:var(--text)}
   </style>
 </head>
 <body>
@@ -81,6 +121,108 @@
       <code id="fx-row-count">loading...</code>.
     </div>
     <button onclick="refreshFxRates()">↻ Refresh FX rates now</button>
+  </div>
+
+  <h2 style="margin:24px 0 8px;font-size:1.1rem">🔗 Share links</h2>
+  <div class="share-card">
+    <h3>View-only access for accountants / collaborators</h3>
+    <div class="info-line">
+      Generate a long random URL that lets the recipient view a single
+      account's reports (read-only, no edits, no IBKR access). Each link can
+      be limited to specific tabs and can be revoked or deleted at any time.
+      The token IS the credential, treat the URL as a secret.
+    </div>
+
+    <button class="primary" onclick="toggleShareCreateForm()">+ Create new share link</button>
+
+    <div class="share-create-form" id="share-create-form">
+      <label>
+        <span>Account</span>
+        <select id="share-create-account">
+          {% for code, acc in accounts_full.items() %}
+            <option value="{{ code }}">{{ acc.name }} ({{ acc.type }})</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        <span>Allowed tabs</span>
+        <div>
+          <label class="share-tab-checkbox"><input type="checkbox" value="tob" checked> TOB</label>
+          <label class="share-tab-checkbox"><input type="checkbox" value="pnl" checked> P&amp;L</label>
+          <label class="share-tab-checkbox"><input type="checkbox" value="performance"> Performance</label>
+          <label class="share-tab-checkbox"><input type="checkbox" value="cgt"> CGT 2026+</label>
+          <label class="share-tab-checkbox"><input type="checkbox" value="dividends" checked> Dividends</label>
+          <label class="share-tab-checkbox"><input type="checkbox" value="methodology"> Methodology</label>
+        </div>
+      </label>
+
+      <label>
+        <span>Label (optional, your reference only)</span>
+        <input type="text" id="share-create-label" maxlength="120"
+               placeholder="e.g. Accountant 2025 review"/>
+      </label>
+
+      <label>
+        <span>Expires in (days, blank = no expiry)</span>
+        <input type="number" id="share-create-expires" min="1" max="3650" placeholder="30"/>
+      </label>
+
+      <div class="actions-inline" style="margin-top:14px">
+        <button onclick="cancelShareCreate()">Cancel</button>
+        <button class="primary" onclick="doShareCreate()">Generate link</button>
+      </div>
+
+      <div class="share-link-new" id="share-new-link" style="display:none">
+        <strong>✓ Link created.</strong> Copy it now, it will not be shown again in this card.
+        <code id="share-new-link-url"></code>
+        <button onclick="copyShareUrl()" style="margin-top:8px">📋 Copy URL</button>
+      </div>
+    </div>
+
+    {% if share_links %}
+    <table class="share-table">
+      <thead><tr>
+        <th>Account</th>
+        <th>Tabs</th>
+        <th>Label</th>
+        <th>Token (prefix)</th>
+        <th>Created</th>
+        <th>Expires</th>
+        <th>Last accessed</th>
+        <th>Status</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+      {% for s in share_links %}
+        <tr class="{% if s.revoked %}revoked{% endif %}">
+          <td>{{ s.account_name }}</td>
+          <td>
+            {% for t in s.allowed_tabs.split(',') %}
+              <span class="share-tab-pill">{{ t }}</span>
+            {% endfor %}
+          </td>
+          <td>{{ s.label or '—' }}</td>
+          <td class="share-token-cell">{{ s.token[:12] }}…</td>
+          <td>{{ s.created_at }}</td>
+          <td>{{ s.expires_at or '—' }}</td>
+          <td>{{ s.last_accessed_at or 'never' }}</td>
+          <td>{% if s.revoked %}<span style="color:var(--red)">revoked</span>{% else %}<span style="color:var(--accent)">active</span>{% endif %}</td>
+          <td class="actions">
+            <div class="actions-inline">
+              {% if not s.revoked %}
+                <button onclick="doShareRevoke({{ s.id }})">Revoke</button>
+              {% endif %}
+              <button class="danger" onclick="doShareDelete({{ s.id }})">Delete</button>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="info-line" style="margin-top:14px">No share links yet.</div>
+    {% endif %}
   </div>
 
   <h2 style="margin:24px 0 8px;font-size:1.1rem;color:var(--red)">⚠ Destructive operations</h2>
@@ -236,6 +378,98 @@
     }
   }
   loadFxStatus();
+
+  // ----- Share links -----
+  function toggleShareCreateForm() {
+    const f = document.getElementById('share-create-form');
+    f.classList.toggle('show');
+    document.getElementById('share-new-link').style.display = 'none';
+  }
+  function cancelShareCreate() {
+    document.getElementById('share-create-form').classList.remove('show');
+    document.getElementById('share-create-label').value = '';
+    document.getElementById('share-create-expires').value = '';
+    document.getElementById('share-new-link').style.display = 'none';
+  }
+  async function doShareCreate() {
+    const account_code = document.getElementById('share-create-account').value;
+    const allowed_tabs = Array.from(
+      document.querySelectorAll('#share-create-form .share-tab-checkbox input:checked')
+    ).map(cb => cb.value);
+    const label = document.getElementById('share-create-label').value.trim();
+    const expiresRaw = document.getElementById('share-create-expires').value.trim();
+    const expires_in_days = expiresRaw === '' ? null : parseInt(expiresRaw, 10);
+
+    if (allowed_tabs.length === 0) {
+      toast('Pick at least one tab', {type: 'error', duration: 3000});
+      return;
+    }
+
+    const t = toast('Creating share link...', {spin: true, duration: 0});
+    try {
+      const res = await fetchCsrf('/share-links', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({account_code, allowed_tabs, label, expires_in_days}),
+      });
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        const url = location.origin + '/share/' + data.share.token;
+        document.getElementById('share-new-link-url').textContent = url;
+        document.getElementById('share-new-link').style.display = 'block';
+        toast('Share link generated', {type: 'success', duration: 2200});
+      } else {
+        toast('Error: ' + (data.errors || []).join('; '), {type: 'error', duration: 5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type: 'error', duration: 4000});
+    }
+  }
+  function copyShareUrl() {
+    const url = document.getElementById('share-new-link-url').textContent;
+    navigator.clipboard.writeText(url).then(
+      () => toast('URL copied', {type: 'success', duration: 1500}),
+      () => toast('Copy failed, select and copy manually', {type: 'error', duration: 3000})
+    );
+  }
+  async function doShareRevoke(id) {
+    if (!confirm('Revoke this share link? The URL will stop working immediately. The row is kept for the audit trail.')) return;
+    const t = toast('Revoking...', {spin: true, duration: 0});
+    try {
+      const res = await fetchCsrf('/share-links/' + id + '/revoke', {method: 'POST'});
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast('Revoked. Reloading...', {type: 'success', duration: 1600});
+        setTimeout(() => location.reload(), 900);
+      } else {
+        toast('Error: ' + (data.error || 'unknown'), {type: 'error', duration: 5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type: 'error', duration: 4000});
+    }
+  }
+  async function doShareDelete(id) {
+    if (!confirm('Delete this share link permanently? No audit trail will remain. Use Revoke if you want to keep the history.')) return;
+    const t = toast('Deleting...', {spin: true, duration: 0});
+    try {
+      const res = await fetchCsrf('/share-links/' + id, {method: 'DELETE'});
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast('Deleted. Reloading...', {type: 'success', duration: 1600});
+        setTimeout(() => location.reload(), 900);
+      } else {
+        toast('Error: ' + (data.error || 'unknown'), {type: 'error', duration: 5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type: 'error', duration: 4000});
+    }
+  }
 </script>
 </body>
 </html>

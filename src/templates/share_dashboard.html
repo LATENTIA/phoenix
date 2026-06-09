@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Phoenix (view-only) — {{ account_name|capitalize }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+  <style>
+    /* View-only banner. Mirrors the .env-pill colour scheme so it reads as a
+       status pill rather than a warning. */
+    .viewonly-banner {
+      background: rgba(56,189,248,.08);
+      border: 1px solid var(--accent);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 14px 0;
+      font-size: .9rem;
+      color: #bae6fd;
+    }
+    .viewonly-banner strong { color: #fff }
+  </style>
+</head>
+<body style="--accent-color: var(--{{ account_type }})">
+
+<div class="container">
+  <div class="topbar">
+    <div class="title">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="brand-mark"
+           width="36" height="46"/>
+      <h1>Phoenix</h1>
+      <span class="env-pill">{{ account_name }}</span>
+    </div>
+    <div class="env-switch">
+      <span class="muted" style="padding:6px 12px;font-size:.85rem">
+        view-only access
+      </span>
+    </div>
+  </div>
+
+  <div class="viewonly-banner">
+    <strong>👁 View-only share link.</strong>
+    You are viewing the <strong>{{ account_name }}</strong> account. No
+    edits, no downloads from IBKR. Access can be revoked at any time by the
+    account owner.
+    {% if label %}<br/><span class="muted">Link label: {{ label }}</span>{% endif %}
+    {% if expires_at %}<br/><span class="muted">Expires: {{ expires_at }}</span>{% endif %}
+  </div>
+
+  <div class="tabs" role="tablist">
+    {% set tab_labels = {
+      'tob': 'TOB',
+      'pnl': 'P&L',
+      'performance': 'Performance',
+      'cgt': 'CGT 2026+',
+      'dividends': 'Dividends',
+      'methodology': 'Methodology'
+    } %}
+    {% for t in allowed_tabs %}
+      <button class="tab {% if loop.first %}active{% endif %}"
+              data-report="{{ t }}"
+              onclick="showShareReport('{{ t }}')">{{ tab_labels.get(t, t) }}</button>
+    {% endfor %}
+  </div>
+
+  <div class="viewer" id="viewer">
+    <div class="placeholder">
+      Click a tab above to view that report.
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    Built by
+    <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>
+    · <a href="/license">Free for personal, non-commercial use</a>
+  </footer>
+</div>
+
+<script>
+  const SHARE_TOKEN = "{{ token }}";
+
+  function showShareReport(kind) {
+    // Highlight the active tab.
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.report === kind);
+    });
+    // Render the report in an iframe so its <style>/<script> are isolated
+    // from the share dashboard's chrome (mirrors the main dashboard).
+    //
+    // Two special cases mirror the main dashboard's showReport():
+    //  - 'performance' is the P&L report with ?tab=performance, so the
+    //    P&L template's internal JS opens the Performance subtab.
+    //  - We append a timestamp so the iframe is a fresh fetch (no cache).
+    const viewer = document.getElementById('viewer');
+    const ts = Date.now();
+    let url;
+    if (kind === 'performance') {
+      url = `/share/${SHARE_TOKEN}/report/pnl?t=${ts}&tab=performance`;
+    } else {
+      url = `/share/${SHARE_TOKEN}/report/${kind}?t=${ts}`;
+    }
+    viewer.innerHTML =
+      `<iframe src="${url}" `
+      + `style="width:100%;height:calc(100vh - 220px);border:0;background:#fff" `
+      + `loading="lazy"></iframe>`;
+  }
+
+  // Auto-load the first allowed tab.
+  document.addEventListener('DOMContentLoaded', () => {
+    const first = document.querySelector('.tab');
+    if (first) showShareReport(first.dataset.report);
+  });
+</script>
+</body>
+</html>

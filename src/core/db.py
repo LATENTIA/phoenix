@@ -174,6 +174,23 @@ CREATE TABLE IF NOT EXISTS fx_rates (
     eur_usd  REAL NOT NULL
 );
 
+-- Read-only share links. Each row hands out a long random token that grants
+-- view-only access to ONE account's reports, scoped to a chosen tab list.
+-- The link IS the credential: anyone with the URL gets in (no basic auth).
+-- `revoked=1` disables a link immediately; DELETE wipes it without history.
+CREATE TABLE IF NOT EXISTS share_links (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    token            TEXT UNIQUE NOT NULL,        -- 32 bytes URL-safe (~44 chars)
+    account_code     TEXT NOT NULL,
+    allowed_tabs     TEXT NOT NULL,               -- CSV: 'tob,pnl,dividends'
+    label            TEXT,
+    created_at       TEXT NOT NULL,
+    expires_at       TEXT,                        -- ISO 8601, NULL = never
+    revoked          INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
+
 -- Year-end marks for the Belgian CGT 2026+ basis reset.
 -- One row per (symbol, date). Source records where the price came from
 -- so the user can audit / override stale or manually entered values.
@@ -938,6 +955,109 @@ def list_manual_trades(conn: sqlite3.Connection, account_code: str) -> pd.DataFr
            ORDER BY trade_date DESC, id DESC""",
         conn, params=(account_code,),
     )
+
+
+# ---------- Share links (view-only access tokens) ----------
+
+import secrets as _stdlib_secrets
+
+
+def create_share_link(conn: sqlite3.Connection, *,
+                      account_code: str,
+                      allowed_tabs: list[str],
+                      label: str = "",
+                      expires_at: Optional[str] = None) -> dict:
+    """Generate a new view-only share link.
+
+    Returns a dict with `id`, `token` (use to build the URL), and other
+    fields the settings UI displays. The token is a 32-byte URL-safe
+    random string (~43 ASCII chars, ~256 bits of entropy)."""
+    if not allowed_tabs:
+        raise ValueError("allowed_tabs must contain at least one tab name")
+
+    token = _stdlib_secrets.token_urlsafe(32)
+    created_at = datetime.utcnow().isoformat(timespec="seconds")
+    tabs_csv = ",".join(sorted(set(t.strip().lower() for t in allowed_tabs if t.strip())))
+
+    cur = conn.execute(
+        """INSERT INTO share_links
+           (token, account_code, allowed_tabs, label, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (token, account_code, tabs_csv, label.strip()[:200], created_at, expires_at),
+    )
+    conn.commit()
+    return {
+        "id": cur.lastrowid,
+        "token": token,
+        "account_code": account_code,
+        "allowed_tabs": tabs_csv,
+        "label": label.strip()[:200],
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "revoked": 0,
+    }
+
+
+def validate_share_token(conn: sqlite3.Connection, token: str) -> Optional[dict]:
+    """Return the share-link row if `token` is valid (exists, not revoked,
+    not expired). None otherwise. Don't leak any other reason to the caller;
+    we want 404 on every failed validation, never 401/403."""
+    if not token:
+        return None
+    row = conn.execute(
+        """SELECT id, token, account_code, allowed_tabs, label,
+                  created_at, expires_at, revoked, last_accessed_at
+           FROM share_links WHERE token = ?""",
+        (token,),
+    ).fetchone()
+    if row is None:
+        return None
+    if row["revoked"]:
+        return None
+    if row["expires_at"]:
+        if row["expires_at"] < datetime.utcnow().isoformat(timespec="seconds"):
+            return None
+    return dict(row)
+
+
+def touch_share_link_access(conn: sqlite3.Connection, share_id: int) -> None:
+    """Stamp last_accessed_at so admins can see when a link was last used."""
+    conn.execute(
+        "UPDATE share_links SET last_accessed_at = ? WHERE id = ?",
+        (datetime.utcnow().isoformat(timespec="seconds"), share_id),
+    )
+    conn.commit()
+
+
+def list_share_links(conn: sqlite3.Connection) -> pd.DataFrame:
+    """All share links, newest first. Includes revoked ones (settings UI
+    shows them greyed-out so the admin sees the history)."""
+    return pd.read_sql_query(
+        """SELECT id, token, account_code, allowed_tabs, label,
+                  created_at, expires_at, revoked, last_accessed_at
+           FROM share_links ORDER BY id DESC""",
+        conn,
+    )
+
+
+def revoke_share_link(conn: sqlite3.Connection, share_id: int) -> bool:
+    """Set revoked=1. Idempotent. Returns True if the row was found and
+    updated (regardless of whether it was already revoked)."""
+    cur = conn.execute(
+        "UPDATE share_links SET revoked = 1 WHERE id = ?", (share_id,)
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_share_link(conn: sqlite3.Connection, share_id: int) -> bool:
+    """Hard-delete a share link row (no audit trail). Returns True if a
+    row was deleted."""
+    cur = conn.execute(
+        "DELETE FROM share_links WHERE id = ?", (share_id,)
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def get_corporate_actions(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:

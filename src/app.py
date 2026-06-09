@@ -186,16 +186,21 @@ def _require_basic_auth():
     """Gate every route behind HTTP Basic Auth when both PHOENIX_AUTH_USER
     and PHOENIX_AUTH_PASS_HASH are set. Both unset = auth disabled (local dev).
 
-    Set them like:
-        export PHOENIX_AUTH_USER=admin
-        export PHOENIX_AUTH_PASS_HASH="$(python -c 'from werkzeug.security import generate_password_hash; print(generate_password_hash("yourpassword"))')"
-
-    Only one user is supported on purpose (this is a single-tenant app).
+    Public exceptions (no basic-auth challenge):
+      - /share/<token>*   — share-link URLs validate their own token in the
+                             view function. Lets accountants reach the share
+                             dashboard without basic-auth credentials.
+      - /static/*         — CSS / JS / images, no sensitive data.
+      - /favicon.ico      — convenience.
     """
     expected_user = os.environ.get("PHOENIX_AUTH_USER")
     expected_hash = os.environ.get("PHOENIX_AUTH_PASS_HASH")
     if not expected_user or not expected_hash:
         return None        # auth disabled
+
+    path = request.path
+    if path.startswith("/share/") or path.startswith("/static/") or path == "/favicon.ico":
+        return None        # public path — no basic-auth challenge
 
     auth = request.authorization
     if (auth and auth.username == expected_user
@@ -839,11 +844,217 @@ def settings_page():
         a["name"]: account_service.report_status(a["name"], downloaded_dir=DOWNLOADED_DIR)
         for a in accs.values()
     }
+    conn = db.connect()
+    db.init_schema(conn)
+    share_links = db.list_share_links(conn).to_dict("records")
+    conn.close()
+    # Enrich each share link with the human-readable account name for display.
+    code_to_name = {code: a["name"] for code, a in accs.items()}
+    for s in share_links:
+        s["account_name"] = code_to_name.get(s["account_code"], s["account_code"])
     return render_template(
         "settings.html",
         accounts_full=accs,
         statuses=statuses,
+        share_links=share_links,
     )
+
+
+# ---------------------------------------------------------------------------
+# Read-only share links. Anyone with the URL gets in (no basic auth).
+# The token is the credential; revoke or delete it to cut access.
+# ---------------------------------------------------------------------------
+
+# Reports the dashboard knows how to render (must match the keys used by the
+# main dashboard's showReport() in dashboard.js). Used to validate the tab
+# list when creating a share link.
+KNOWN_REPORT_KINDS = ("tob", "pnl", "performance", "cgt", "dividends", "methodology")
+
+
+def _share_or_404(token: str):
+    """Validate a share token, touch its last-accessed timestamp, return the
+    share-link dict or abort(404). Centralised so every share route behaves
+    identically — same response for revoked / expired / nonexistent tokens,
+    no information leaked about which case it was."""
+    conn = db.connect()
+    db.init_schema(conn)
+    share = db.validate_share_token(conn, token)
+    if share is None:
+        conn.close()
+        abort(404)
+    db.touch_share_link_access(conn, share["id"])
+    conn.close()
+    return share
+
+
+@app.route("/share/<token>")
+@limiter.limit("60 per minute")
+def share_dashboard(token: str):
+    """View-only dashboard scoped to one account and a fixed set of tabs.
+    The token IS the credential — no basic-auth prompt, no edit operations,
+    no account switcher. Iframe sub-requests go to /share/<token>/report/<k>."""
+    share = _share_or_404(token)
+
+    accs = account_service.get_accounts()
+    code_to_name = {code: a["name"] for code, a in accs.items()}
+    account_name = code_to_name.get(share["account_code"], share["account_code"])
+    account_type = (accs.get(share["account_code"]) or {}).get("type", "personal")
+
+    allowed_tabs = [t for t in share["allowed_tabs"].split(",") if t]
+    # Filter to the tabs Phoenix actually knows how to render. Defends
+    # against stale data if the report set ever shrinks.
+    allowed_tabs = [t for t in allowed_tabs if t in KNOWN_REPORT_KINDS]
+
+    return render_template(
+        "share_dashboard.html",
+        token=token,
+        account_name=account_name,
+        account_type=account_type,
+        allowed_tabs=allowed_tabs,
+        label=share.get("label") or "",
+        expires_at=share.get("expires_at"),
+        created_at=share.get("created_at"),
+    )
+
+
+@app.route("/share/<token>/report/<kind>")
+@limiter.limit("60 per minute")
+def share_report(token: str, kind: str):
+    """Render the report inside the share dashboard's iframe. Validates the
+    token, checks the requested kind is in the share's allowed_tabs, then
+    renders that report for the share's account_code. 404 on any failure —
+    don't reveal whether the issue was the token, the tab, or the account."""
+    share = _share_or_404(token)
+
+    allowed = set(t for t in share["allowed_tabs"].split(",") if t)
+    # Performance is rendered by the P&L builder with a ?tab=performance
+    # query string (mirrors the main dashboard), so 'pnl' access is granted
+    # if either 'pnl' or 'performance' is in the share's allowed_tabs.
+    if kind == "pnl" and ("pnl" in allowed or "performance" in allowed):
+        pass
+    elif kind in allowed and kind in KNOWN_REPORT_KINDS:
+        pass
+    else:
+        abort(404)
+
+    code = share["account_code"]
+    log.info(f"share/report: token-id={share['id']} kind={kind} account={code}")
+    try:
+        if kind == "tob":
+            from reports import tob as _tob
+            html = _tob.build_tob_html(code)
+        elif kind in ("pnl", "performance"):
+            from reports import pnl as _pnl
+            html = _pnl.build_pnl_html(code)
+        elif kind == "cgt":
+            from reports import cgt as _cgt
+            html = _cgt.build_cgt_html(code)
+        elif kind == "dividends":
+            from reports import dividends as _div
+            html = _div.build_dividends_html(code)
+        elif kind == "methodology":
+            from reports import methodology as _meth
+            html = _meth.build_methodology_html(code)
+        else:
+            abort(404)
+    except Exception as e:
+        log.error(f"share/report FAILED kind={kind}: {e}")
+        log.error(traceback.format_exc())
+        raise
+    return Response(html, mimetype="text/html; charset=utf-8")
+
+
+# ---------- Admin routes for managing share links ----------
+
+@app.route("/share-links", methods=["POST"])
+@limiter.limit("10 per minute")
+def share_links_create():
+    """Admin-only: create a new view-only share link. Body (JSON):
+
+        {
+          "account_code": "B",
+          "allowed_tabs": ["tob", "pnl", "dividends"],
+          "label": "Accountant 2025 review",
+          "expires_in_days": 30          # optional; null/missing = no expiry
+        }
+    """
+    data = request.get_json(silent=True) or {}
+    account_code = (data.get("account_code") or "").strip().upper()
+    allowed_tabs = data.get("allowed_tabs") or []
+    label = (data.get("label") or "").strip()
+    expires_in_days = data.get("expires_in_days")
+
+    errors = []
+    accs = account_service.get_accounts()
+    if account_code not in accs:
+        errors.append(f"unknown account_code {account_code!r}")
+    if not isinstance(allowed_tabs, list) or not allowed_tabs:
+        errors.append("allowed_tabs must be a non-empty list")
+    else:
+        bad = [t for t in allowed_tabs if t not in KNOWN_REPORT_KINDS]
+        if bad:
+            errors.append(f"unknown tabs: {bad}. Known: {list(KNOWN_REPORT_KINDS)}")
+    expires_at = None
+    if expires_in_days not in (None, "", 0):
+        try:
+            days = int(expires_in_days)
+            if days <= 0 or days > 3650:    # 10 years cap
+                errors.append("expires_in_days must be 1..3650")
+            else:
+                from datetime import timedelta
+                expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            errors.append("expires_in_days must be an integer")
+    if errors:
+        return jsonify({"ok": False, "errors": errors}), 400
+
+    conn = db.connect()
+    db.init_schema(conn)
+    try:
+        share = db.create_share_link(
+            conn,
+            account_code=account_code,
+            allowed_tabs=allowed_tabs,
+            label=label,
+            expires_at=expires_at,
+        )
+    except Exception as e:
+        conn.close()
+        return jsonify({"ok": False, "errors": [str(e)]}), 400
+    conn.close()
+    log.info(f"share-links/create: id={share['id']} account={account_code} "
+             f"tabs={share['allowed_tabs']} expires={expires_at}")
+    return jsonify({"ok": True, "share": share})
+
+
+@app.route("/share-links/<int:share_id>/revoke", methods=["POST"])
+@limiter.limit("30 per minute")
+def share_links_revoke(share_id: int):
+    """Revoke (don't delete) a share link. Idempotent. The row is kept so the
+    admin sees the history in the settings table."""
+    conn = db.connect()
+    db.init_schema(conn)
+    ok = db.revoke_share_link(conn, share_id)
+    conn.close()
+    if not ok:
+        return jsonify({"ok": False, "error": "share link not found"}), 404
+    log.info(f"share-links/revoke: id={share_id}")
+    return jsonify({"ok": True})
+
+
+@app.route("/share-links/<int:share_id>", methods=["DELETE"])
+@limiter.limit("30 per minute")
+def share_links_delete(share_id: int):
+    """Hard-delete a share link. No audit trail. Use revoke if you want
+    to keep the historical record."""
+    conn = db.connect()
+    db.init_schema(conn)
+    ok = db.delete_share_link(conn, share_id)
+    conn.close()
+    if not ok:
+        return jsonify({"ok": False, "error": "share link not found"}), 404
+    log.info(f"share-links/delete: id={share_id}")
+    return jsonify({"ok": True})
 
 
 @app.route("/license")
