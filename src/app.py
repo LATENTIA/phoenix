@@ -22,6 +22,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFError, CSRFProtect
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
 from core import accounts as account_service
@@ -110,6 +111,22 @@ log = logging.getLogger("ibkr.app")
 
 
 app = Flask(__name__)
+
+# ---------- Proxy awareness ----------
+# In production, Caddy sits in front of Phoenix and terminates TLS. Without
+# this middleware, Flask's request.remote_addr would be Caddy's Docker IP
+# (172.x.x.x) for every request, which means flask-limiter would rate-limit
+# all of Caddy's outgoing requests as one client. ProxyFix reads the
+# X-Forwarded-* headers that Caddy sets and patches request.remote_addr,
+# request.scheme, and request.host accordingly so downstream code sees the
+# real client.
+#
+# `x_for=1` etc. mean "trust exactly ONE proxy layer". This is correct
+# whether you're behind just Caddy (prod) or directly accessing Flask (dev,
+# no proxy — middleware is a no-op since no X-Forwarded-* headers exist).
+# Bumping these numbers would let a client spoof headers, so leave them at 1.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 
 # ---------- Security config ----------
 # SECRET_KEY: signs CSRF tokens and session cookies. Read from env so the

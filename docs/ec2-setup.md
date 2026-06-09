@@ -159,6 +159,8 @@ Add exactly these. Names matter; the workflow looks them up by name:
 | `PHOENIX_SECRET_KEY` | (64-char hex string from `secrets.token_hex(32)`) | Signs Flask session cookies and CSRF tokens. |
 | `PHOENIX_DATA_DIR` *(optional)* | `/var/phoenix-data` | Defaults to `/var/phoenix-data` if unset. Set this if you mount an EBS volume elsewhere. |
 | `PHOENIX_SECRETS_BACKEND` *(optional)* | `plaintext` or `aws` | Defaults to `plaintext`. Set to `aws` only if you've also given the EC2 IAM role `secretsmanager:*` permissions on `arn:aws:secretsmanager:*:*:secret:phoenix/*`. |
+| `PHOENIX_DOMAIN` *(required for HTTPS)* | `phoenix.yourdomain.com` | The subdomain Caddy serves on. Must resolve to this EC2 instance via DNS BEFORE the first deploy (otherwise Let's Encrypt cert acquisition fails). See §4 below. |
+| `CADDY_EMAIL` *(required for HTTPS)* | `you@example.com` | Email Let's Encrypt sends expiry warnings to. ACME requires it; they almost never email. |
 
 After adding them, you should see something like this in the secrets list:
 
@@ -177,7 +179,75 @@ read access, only to repo admins (and only as masked values in logs).
 
 ---
 
-## 4. First deploy
+## 4. HTTPS via Caddy + Route 53 (one-time setup)
+
+Phoenix uses an in-container Caddy reverse proxy that terminates TLS and
+forwards to the Flask app over the internal Docker network. The cert is
+free, auto-provisioned by Let's Encrypt, auto-renewed by Caddy.
+
+### 4a. Allocate an Elastic IP
+
+EC2 public IPs change when the instance reboots. An Elastic IP stays
+attached to the instance and gives you a stable address for DNS.
+
+1. AWS Console → **EC2 → Elastic IPs → Allocate Elastic IP address**.
+2. Region: same as your EC2.
+3. After allocation, **Actions → Associate Elastic IP address** → pick
+   your Phoenix instance.
+4. Note the allocated public IP — you'll point DNS at it next.
+
+Cost: $0 while attached to a running instance, $3.60/month if you ever
+detach it and let it sit unused.
+
+### 4b. Add the A record in Route 53
+
+1. AWS Console → **Route 53 → Hosted zones → your domain**.
+2. **Create record**.
+3. Record name: the subdomain you want (e.g. `phoenix`).
+4. Record type: `A`.
+5. Value: the Elastic IP from step 4a.
+6. TTL: `300` (5 minutes — short so changes propagate fast).
+7. Routing policy: Simple.
+8. **Create records**.
+
+Verify the DNS resolves before continuing:
+
+```bash
+# From your laptop:
+nslookup phoenix.yourdomain.com
+# Should return the Elastic IP.
+```
+
+If it doesn't resolve yet, wait a minute and retry. Don't proceed to the
+first deploy until DNS resolves — Let's Encrypt's HTTP-01 challenge needs
+the domain to point at your server.
+
+### 4c. Confirm port 80 + 443 are open in the security group
+
+Caddy listens on both. The Let's Encrypt HTTP-01 challenge requires 80
+to be reachable from anywhere on the public internet.
+
+EC2 → Instance → Security tab → Security group → **Inbound rules**:
+
+- `22 TCP 0.0.0.0/0` (or restricted to your IPs)
+- `80 TCP 0.0.0.0/0`  ← needed for Caddy + cert challenge
+- `443 TCP 0.0.0.0/0` ← needed for HTTPS
+- `5000` should NOT be open
+
+If 80 / 443 are missing, edit the rules and add them.
+
+### 4d. Add the two GitHub Secrets
+
+In your repo: **Settings → Secrets and variables → Actions**:
+
+- `PHOENIX_DOMAIN` = `phoenix.yourdomain.com` (no scheme, no path)
+- `CADDY_EMAIL` = your email
+
+After this is set, the next deploy starts Caddy with the right config.
+
+---
+
+## 5. First deploy
 
 Two ways to trigger the workflow:
 
@@ -188,18 +258,24 @@ Watch the run in the Actions UI. You should see all eight steps go green
 in 2-5 minutes (first build is slow; subsequent builds use Docker layer
 cache and finish in ~30 seconds).
 
-After it's green, log in via the SSH tunnel (or whatever you set up in
-step 1d):
+After it's green:
 
-```bash
-ssh -L 5000:127.0.0.1:5000 deploy@<ec2-host>
-# Then in your browser: http://127.0.0.1:5000/
-# Log in with PHOENIX_AUTH_USER + the plaintext password you set.
-```
+- **With HTTPS (PHOENIX_DOMAIN configured)**: Open
+  `https://phoenix.yourdomain.com/` directly in your browser. Basic-auth
+  dialog → log in with `PHOENIX_AUTH_USER` + plaintext password.
+- **Without HTTPS** (only for debugging without DNS set up): SSH tunnel
+  ```bash
+  ssh -L 5000:127.0.0.1:5000 deploy@<ec2-host>
+  # Then: http://127.0.0.1:5000/
+  ```
+
+The first HTTPS request can take 20-60 seconds because Caddy fetches a
+fresh Let's Encrypt cert. Subsequent requests are instant. The smoke test
+in the workflow already accounts for this (retries with backoff).
 
 ---
 
-## 5. Updating the app
+## 6. Updating the app
 
 Just push to `main`. The workflow:
 
@@ -222,7 +298,7 @@ Just push to `main`. The workflow:
 
 ---
 
-## 6. Backups
+## 7. Backups
 
 The whole of `/var/phoenix-data/` is your data. Snapshot it:
 
@@ -243,7 +319,7 @@ Schedule via AWS Data Lifecycle Manager (DLM) for daily/weekly retention.
 
 ---
 
-## 7. Rolling back
+## 8. Rolling back
 
 If a bad deploy ships, two options:
 
@@ -255,13 +331,24 @@ If a bad deploy ships, two options:
 
 ---
 
-## 8. Common gotchas
+## 9. Common gotchas
 
 - **First deploy hangs on Docker build**: pandas wheel install pulls
   ~50 MB. A `t2.micro` (1 GB RAM) can OOM; bump to `t3.small`.
 - **`/license` returns 200 (no auth)**: GitHub Secrets `PHOENIX_AUTH_USER`
   or `PHOENIX_AUTH_PASS_HASH` is empty. The workflow's final smoke-test
   step catches this and fails the run.
+- **HTTPS cert never issues** (`https://phoenix.yourdomain.com` won't
+  load): three usual causes. (1) DNS doesn't resolve yet — check with
+  `nslookup phoenix.yourdomain.com`. (2) Port 80 isn't open in the
+  security group — Let's Encrypt's HTTP-01 challenge needs it. (3)
+  Let's Encrypt rate-limited you (50 issuance attempts/week for a
+  registered domain). On EC2 run `docker compose logs caddy` to see
+  the exact ACME error.
+- **HTTPS works once then later fails with cert error**: Caddy's auto-
+  renewal needs the same conditions as initial issuance (DNS + port 80
+  reachable). If you changed your subdomain or moved Elastic IPs, renew
+  manually: `docker compose --profile prod exec caddy caddy reload`.
 - **Hash arrives mangled at the container**: the workflow's Python step
   already escapes `$` → `$$`. If it still mangles, paste the hash into
   the GitHub Secret again — sometimes copy/paste introduces trailing

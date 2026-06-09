@@ -141,17 +141,25 @@ jobs:
             "chmod 600 $DEPLOY_DIR/.env.runtime"
           rm .env.runtime.tmp
 
-          # ALSO write a project-root .env file with just the data-dir path.
-          # docker-compose's ${PHOENIX_DATA_DIR:-./phoenix-data} interpolation
-          # at yaml-parse time reads from the shell env or this auto-loaded
-          # .env file — NOT from env_file (.env.runtime). Without this, the
-          # bind mount falls back to ./phoenix-data inside the deploy dir
-          # and the container can't reach /var/phoenix-data.
+          # ALSO write a project-root .env file with compose-interpolation
+          # vars (PHOENIX_DATA_DIR, PHOENIX_DOMAIN, CADDY_EMAIL).
+          # docker-compose's ${VAR} interpolation at yaml-parse time reads
+          # from the shell env or this auto-loaded .env file — NOT from
+          # env_file (.env.runtime). Without this, the bind mount falls
+          # back to ./phoenix-data and the Caddy service can't start.
           DATA_DIR="${{ secrets.PHOENIX_DATA_DIR }}"
           DATA_DIR="${DATA_DIR:-/var/phoenix-data}"
+          DOMAIN="${{ secrets.PHOENIX_DOMAIN }}"
+          EMAIL="${{ secrets.CADDY_EMAIL }}"
           ssh -i ~/.ssh/deploy_key \
-            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
-            "printf 'PHOENIX_DATA_DIR=%s\n' '$DATA_DIR' > $DEPLOY_DIR/.env && chmod 600 $DEPLOY_DIR/.env"
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<EOF
+          cat > $DEPLOY_DIR/.env <<ENV
+          PHOENIX_DATA_DIR=$DATA_DIR
+          PHOENIX_DOMAIN=$DOMAIN
+          CADDY_EMAIL=$EMAIL
+          ENV
+          chmod 600 $DEPLOY_DIR/.env
+          EOF
 
       # ----- 5. Make sure the persistent data dir exists on EC2 -----
       - name: Ensure data directory exists on EC2
@@ -181,35 +189,64 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<EOF
           set -e
           cd "$DEPLOY_DIR"
-          docker compose up -d --build
+          # --profile prod starts both Phoenix AND Caddy (the reverse proxy).
+          # Caddy provisions a Let's Encrypt cert on first start (assumes
+          # PHOENIX_DOMAIN resolves to this server's IP via Route 53).
+          docker compose --profile prod up -d --build
           # Brief settle, then dump status + last log lines for visibility in
           # the GitHub Actions UI.
           sleep 4
-          docker compose ps
-          echo "----- last 30 log lines -----"
-          docker compose logs --tail 30 phoenix
+          docker compose --profile prod ps
+          echo "----- phoenix logs (last 20) -----"
+          docker compose logs --tail 20 phoenix
+          echo "----- caddy logs (last 20) -----"
+          docker compose logs --tail 20 caddy || true
           EOF
 
       # ----- 7. Sanity check: the running container answers HTTP -----
       - name: Smoke test
+        env:
+          PHOENIX_DOMAIN: ${{ secrets.PHOENIX_DOMAIN }}
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<'EOF'
+          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "PHOENIX_DOMAIN='$PHOENIX_DOMAIN' bash -s" <<'EOF'
           set -e
-          # Use the container-internal port (not the host port) so this works
-          # even when EC2 doesn't expose 5000 to the world (which it shouldn't).
-          # We expect 401 from /license without credentials — that proves the
-          # auth gate is on and the route handler is reachable.
+
+          # 1. Phoenix itself, via the loopback port. 401 = auth gate working.
           status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/license || true)
           if [ "$status" = "401" ]; then
-            echo "OK: /license returned 401 (auth gate working)"
+            echo "OK   phoenix /license returned 401 (auth gate working)"
           elif [ "$status" = "200" ]; then
-            echo "WARN: /license returned 200 — auth gate is OFF on EC2"
-            echo "      Check that PHOENIX_AUTH_USER + PHOENIX_AUTH_PASS_HASH"
-            echo "      are set in GitHub Secrets and made it to .env.runtime."
+            echo "FAIL phoenix /license returned 200 (auth gate OFF; check GH Secrets)"
             exit 1
           else
-            echo "FAIL: /license returned $status (container down or misconfigured)"
+            echo "FAIL phoenix /license returned $status (container down or misconfigured)"
             exit 1
+          fi
+
+          # 2. Caddy → Phoenix via HTTPS. Only meaningful if PHOENIX_DOMAIN
+          # resolves to this server and the cert was issued.
+          if [ -n "$PHOENIX_DOMAIN" ]; then
+            echo "Probing https://$PHOENIX_DOMAIN/license ..."
+            # Caddy can take 20-60s on first start to fetch a Let's Encrypt cert.
+            for i in 1 2 3 4 5 6; do
+              hstatus=$(curl -s -o /dev/null -w "%{http_code}" "https://$PHOENIX_DOMAIN/license" || true)
+              if [ "$hstatus" = "401" ]; then
+                echo "OK   https://$PHOENIX_DOMAIN/license returned 401 (TLS + auth working)"
+                break
+              fi
+              echo "  attempt $i: status=$hstatus, waiting 10s for cert / startup..."
+              sleep 10
+            done
+            if [ "$hstatus" != "401" ]; then
+              echo "WARN https probe ended on status $hstatus"
+              echo "     Cert may still be provisioning. Check 'docker compose logs caddy'"
+              echo "     on the EC2 host. Common causes: DNS not yet resolving, port 80"
+              echo "     not reachable from the public internet, or Let's Encrypt rate limit."
+              # Don't fail the deploy on this — TLS provisioning timing varies.
+            fi
+          else
+            echo "Skipping HTTPS probe (PHOENIX_DOMAIN secret not set)."
           fi
           EOF
 

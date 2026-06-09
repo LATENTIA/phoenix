@@ -1,0 +1,49 @@
+# Caddy v2 config. Sits in front of Phoenix on EC2.
+#
+# What this does:
+#   - Listens on 80 and 443.
+#   - Auto-obtains and auto-renews a Let's Encrypt cert for $PHOENIX_DOMAIN.
+#   - Redirects all HTTP → HTTPS.
+#   - Reverse-proxies HTTPS traffic to phoenix:5000 over the internal
+#     Docker network (defined in docker-compose.yml).
+#   - Forwards X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
+#     automatically so Phoenix's rate limiter sees real client IPs (with
+#     Werkzeug ProxyFix middleware enabled on the Flask side).
+#
+# Env vars:
+#   PHOENIX_DOMAIN   e.g. phoenix.latentia.ai. MUST resolve to this server
+#                    via DNS before Caddy starts — otherwise the HTTP-01
+#                    cert challenge fails.
+#   CADDY_EMAIL      email for Let's Encrypt expiry notifications. They
+#                    almost never send anything but it's required by ACME.
+
+{
+    email {$CADDY_EMAIL}
+    # Uncomment for cert-issuance debugging:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$PHOENIX_DOMAIN} {
+    # Forward everything to Phoenix. Caddy adds the standard X-Forwarded-*
+    # headers automatically — ProxyFix in app.py reads them.
+    reverse_proxy phoenix:5000
+
+    # Sensible per-host security headers. Most of these are also set by
+    # Flask-Talisman, but doing them at the edge is defence-in-depth and
+    # ensures non-200 / error pages also carry them.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        # Phoenix loads reports in same-origin iframes, so SAMEORIGIN (not DENY).
+        X-Frame-Options           "SAMEORIGIN"
+        # Don't leak the upstream server identity.
+        -Server
+    }
+
+    # Caddy's own access log → stdout (captured by docker compose logs).
+    log {
+        output stdout
+        format console
+    }
+}

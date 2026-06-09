@@ -34,12 +34,15 @@ services:
     image: phoenix:local
     container_name: phoenix
 
-    # Bind explicitly to 127.0.0.1 on the host so Docker doesn't quietly
-    # expose Phoenix on your LAN/Wi-Fi. Inside the container Flask listens
-    # on 0.0.0.0:5000 (PHOENIX_BIND_HOST set in the Dockerfile).
-    # On EC2, change this to "5000:5000" and let the ALB/Nginx reach it.
+    # 127.0.0.1:5000 on the host stays bound only for local debugging /
+    # smoke tests. The Caddy service (prod profile, below) reaches Phoenix
+    # over the internal Docker network, NOT via this host port. So the
+    # outside world can never hit Phoenix directly even on EC2.
     ports:
       - "127.0.0.1:5000:5000"
+
+    networks:
+      - phoenix-net
 
     # Runtime secrets / config for the container. Read AS-IS by Docker,
     # no variable substitution — so $ characters in your password hash are
@@ -64,3 +67,61 @@ services:
       - ./LICENSE:/app/LICENSE:ro
 
     restart: unless-stopped
+
+
+  # -------------------------------------------------------------------------
+  # Caddy reverse proxy — HTTPS termination + auto Let's Encrypt cert.
+  # -------------------------------------------------------------------------
+  # Only starts when the `prod` compose profile is active. To use:
+  #   docker compose --profile prod up -d --build
+  # Local dev runs without --profile, so Caddy stays off and you can keep
+  # using http://127.0.0.1:5000/ without dealing with TLS.
+  #
+  # On EC2 the GitHub Actions workflow always uses --profile prod, so Caddy
+  # is always on in production.
+  #
+  # Requires two env vars (set in the .env file at the project root):
+  #   PHOENIX_DOMAIN   the fully-qualified subdomain (e.g. phoenix.latentia.ai)
+  #   CADDY_EMAIL      email Let's Encrypt sends expiry warnings to
+  # Both come from GitHub Secrets via the deploy workflow.
+  caddy:
+    image: caddy:2-alpine
+    container_name: phoenix-caddy
+    restart: unless-stopped
+    profiles: [prod]
+
+    ports:
+      - "80:80"                     # HTTP — Caddy redirects to HTTPS
+      - "443:443"                   # HTTPS
+      - "443:443/udp"               # HTTP/3 over QUIC
+
+    environment:
+      PHOENIX_DOMAIN: ${PHOENIX_DOMAIN:?PHOENIX_DOMAIN must be set in .env for prod}
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Docker-managed volumes so cert + config persist across container
+      # restarts. If you ever lose them, Caddy just re-fetches from Let's
+      # Encrypt on next startup (within their per-week rate limits).
+      - caddy-data:/data
+      - caddy-config:/config
+
+    networks:
+      - phoenix-net
+
+    depends_on:
+      - phoenix
+
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+
+networks:
+  # Both services share an internal Docker network so Caddy can reach
+  # Phoenix by its service name ("phoenix:5000") without going through
+  # the host's network stack.
+  phoenix-net:
+    driver: bridge
