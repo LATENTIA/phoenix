@@ -140,6 +140,10 @@ jobs:
             --exclude='.env.*' \
             --exclude='requested.txt' \
             --exclude='*.bak' \
+            --exclude='docker-compose.override.yml' \
+            --exclude='docker-compose.override.yaml' \
+            --exclude='docker-compose.local.yml' \
+            --exclude='docker-compose.local.yaml' \
             -e "ssh -i ~/.ssh/deploy_key" \
             ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$DEPLOY_DIR/"
 

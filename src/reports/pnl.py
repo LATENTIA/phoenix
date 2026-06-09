@@ -597,6 +597,12 @@ def match_lots(
                 "buy_commission_usd": commission,
                 "buy_fx": rate,
                 "asset_category": row.get("assetCategory", ""),
+                # Propagate asset_class + is_manual so downstream logic
+                # (notably _apply_reconcile) can skip crypto/manual lots.
+                # IBKR snapshots never include crypto or manually-entered
+                # trades, so force-closing them on reconcile would be wrong.
+                "asset_class": (row.get("asset_class") or "stock"),
+                "is_manual": int(row.get("is_manual") or 0),
                 "description": row.get("description", ""),
             }
             open_lots[symbol].append(lot)
@@ -712,6 +718,25 @@ def _apply_reconcile(open_lots: dict[str, list[dict]], closed: list[dict],
             continue
         if re.fullmatch(r"[A-Z]{3}\.[A-Z]{3}", symbol):
             continue  # forex, not a stock position
+
+        # IBKR snapshots never include crypto positions or manually-entered
+        # trades, so those lots must never be reconcile-write-off'd. Without
+        # this filter, a manual BTC buy would be silently force-closed at $0
+        # on every report build because IBKR's positions snapshot has no BTC.
+        non_reconcilable = [
+            l for l in lots
+            if (l.get("asset_class") == "crypto")
+               or int(l.get("is_manual") or 0) == 1
+        ]
+        if non_reconcilable and len(non_reconcilable) == len(lots):
+            continue   # every lot is crypto / manual → skip entirely
+        # Mixed case (some IBKR lots + some manual/crypto): only reconcile
+        # against the IBKR-imported, stock-class subset.
+        if non_reconcilable:
+            lots = [l for l in lots if l not in non_reconcilable]
+            if not lots:
+                continue
+
         our_qty = sum(l["qty_remaining"] for l in lots)
         their_qty = ibkr_qty.get(symbol, 0)
         if our_qty <= 1e-6:

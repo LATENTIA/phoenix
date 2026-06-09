@@ -105,7 +105,11 @@ services:
       - 1.1.1.1
 
     environment:
-      PHOENIX_DOMAIN: ${PHOENIX_DOMAIN:?PHOENIX_DOMAIN must be set in .env for prod}
+      # Optional at parse time (so `docker compose ps` works locally without
+      # prod env vars). If Caddy actually starts with PHOENIX_DOMAIN empty,
+      # the Caddyfile will fail to load with a clearer runtime error than the
+      # compose-parse error of `:?` would have produced.
+      PHOENIX_DOMAIN: ${PHOENIX_DOMAIN:-}
       CADDY_EMAIL: ${CADDY_EMAIL:-}
 
     volumes:

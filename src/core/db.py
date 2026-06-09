@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS source_files (
 
 CREATE TABLE IF NOT EXISTS trades (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id       INTEGER NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+    source_id       INTEGER REFERENCES source_files(id) ON DELETE CASCADE,
     account_code    TEXT NOT NULL,
     trade_id        TEXT,
     datetime        TEXT,
@@ -77,7 +77,16 @@ CREATE TABLE IF NOT EXISTS trades (
     quantity        REAL,
     trade_price     REAL,
     proceeds_usd    REAL,
-    commission_usd  REAL
+    commission_usd  REAL,
+    -- Manual entry support. is_manual=1 means a row the user added through
+    -- the dashboard (not from an IBKR statement). Manual rows have source_id
+    -- NULL and survive re-ingest (no source file deletes them).
+    is_manual       INTEGER NOT NULL DEFAULT 0,
+    -- Normalised asset class for tax-rule branching downstream.
+    -- IBKR's `asset_category` carries STK/OPT/FUT/CRYPTO/CASH; we collapse
+    -- those to 'stock' or 'crypto' here for simpler downstream logic.
+    asset_class     TEXT NOT NULL DEFAULT 'stock'
+                    CHECK (asset_class IN ('stock', 'crypto'))
 );
 CREATE INDEX IF NOT EXISTS idx_trades_account_date ON trades(account_code, trade_date);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol       ON trades(symbol);
@@ -244,7 +253,141 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate_add_manual_columns(conn)
+    _migrate_canonicalise_source_paths(conn)
     conn.commit()
+
+
+def _migrate_canonicalise_source_paths(conn: sqlite3.Connection) -> None:
+    """One-time backfill: convert absolute source paths to the canonical
+    (host-portable) form. Also collapses any duplicates created before this
+    rule existed (e.g. the same file ingested once via Windows path, once
+    via Linux path).
+
+    Idempotent — safe to run on every startup. The expensive group/dedup
+    step is gated on whether anything actually needs converting.
+    """
+    rows = conn.execute(
+        "SELECT id, path, account_code, kind FROM source_files"
+    ).fetchall()
+    if not rows:
+        return
+
+    fk_tables = ["trades", "corporate_actions", "transfers",
+                 "open_positions_snapshots", "dividends", "withholding_tax"]
+
+    # Bucket every row by its canonical form so we can detect duplicates.
+    # We DON'T early-return when no conversions are needed — the recovery
+    # step further down still has work to do on already-canonical-but-broken
+    # paths (over-stripped basenames).
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        canon = _canonical_source_path(r["path"])
+        groups.setdefault((r["account_code"], r["kind"], canon), []).append(dict(r))
+
+    converted = 0
+    consolidated = 0
+    for (acct, kind, canon), bucket in groups.items():
+        # Pick the canonical row to keep. Prefer a row whose path is ALREADY
+        # canonical; otherwise the one with the highest id (most recent).
+        bucket.sort(key=lambda r: (r["path"] == canon, r["id"]), reverse=True)
+        keeper = bucket[0]
+        # Repoint the keeper's path to canonical if it isn't already.
+        if keeper["path"] != canon:
+            try:
+                conn.execute(
+                    "UPDATE source_files SET path = ? WHERE id = ?",
+                    (canon, keeper["id"]),
+                )
+                converted += 1
+            except sqlite3.IntegrityError:
+                # A row with this canonical path already exists. Skip; it
+                # gets handled as a duplicate in the next loop.
+                pass
+
+        # Anything else in the bucket is a duplicate of the keeper.
+        for dup in bucket[1:]:
+            for tbl in fk_tables:
+                conn.execute(
+                    f"UPDATE OR IGNORE {tbl} SET source_id = ? WHERE source_id = ?",
+                    (keeper["id"], dup["id"]),
+                )
+            conn.execute("DELETE FROM source_files WHERE id = ?", (dup["id"],))
+            consolidated += 1
+
+    # Recovery step: an earlier (non-idempotent) version of this migration
+    # over-stripped some paths down to just the basename. Restore the
+    # subdir by prepending the account name (`business/`, `personal/`, ...)
+    # to any source row whose path is a bare filename. Idempotent — paths
+    # that already have a `/` or are synthetic (`__manual:*`) are skipped.
+    try:
+        account_names = {
+            row[0]: row[1]
+            for row in conn.execute("SELECT code, name FROM accounts")
+        }
+    except sqlite3.OperationalError:
+        # accounts table doesn't exist yet (very fresh DB) — nothing to do.
+        account_names = {}
+
+    restored = 0
+    if account_names:
+        # Find rows whose path is just a bare basename (no `/`) and isn't a
+        # synthetic `__manual:...` marker. Note: SQL LIKE treats `_` as a
+        # single-char wildcard, so we use substr() instead of LIKE for the
+        # `__` prefix check.
+        bare = conn.execute(
+            "SELECT id, account_code, path FROM source_files "
+            "WHERE path NOT LIKE '%/%' AND substr(path, 1, 2) != '__'"
+        ).fetchall()
+        for r in bare:
+            subdir = account_names.get(r["account_code"])
+            if not subdir:
+                continue
+            new_path = f"{subdir}/{r['path']}"
+            try:
+                conn.execute(
+                    "UPDATE source_files SET path = ? WHERE id = ?",
+                    (new_path, r["id"]),
+                )
+                restored += 1
+            except sqlite3.IntegrityError:
+                # A row with the restored path already exists (unlikely).
+                pass
+
+    if converted or consolidated or restored:
+        import logging
+        logging.getLogger("ibkr.db").info(
+            f"source_files migration: converted {converted}, "
+            f"consolidated {consolidated}, restored-subdir {restored}"
+        )
+
+
+def _migrate_add_manual_columns(conn: sqlite3.Connection) -> None:
+    """Add is_manual + asset_class columns to trades for DBs created before
+    those columns existed. Idempotent — does nothing on a fresh schema."""
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+
+    if "is_manual" not in existing_cols:
+        conn.execute(
+            "ALTER TABLE trades ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0"
+        )
+
+    if "asset_class" not in existing_cols:
+        # SQLite can't add a NOT NULL column with a CHECK constraint via
+        # ALTER TABLE, so add it permissive, backfill, then we live with the
+        # constraint only being enforced on new inserts. The CHECK on the
+        # CREATE TABLE above applies to brand-new tables; for old DBs the
+        # application layer (insert_manual_trade) does the validation.
+        conn.execute(
+            "ALTER TABLE trades ADD COLUMN asset_class TEXT NOT NULL DEFAULT 'stock'"
+        )
+        # Backfill: IBKR's "CRYPTO" asset_category → our 'crypto'. Everything
+        # else (STK, OPT, FUT, CASH) stays at the 'stock' default. The user
+        # can recategorise manually if needed.
+        conn.execute(
+            "UPDATE trades SET asset_class='crypto' "
+            "WHERE UPPER(COALESCE(asset_category, ''))='CRYPTO'"
+        )
 
 
 def reset_database(conn: sqlite3.Connection) -> dict:
@@ -370,14 +513,72 @@ def delete_account(conn: sqlite3.Connection, account_id: int) -> dict:
 
 
 # ---------- Source-file tracking ----------
+#
+# `source_files.path` used to be the absolute path (`/app/data/downloaded/...`
+# or `C:\Users\...\downloaded\...`). That made the UNIQUE constraint useless
+# across host moves: the same file under a new mount point looked like a
+# brand-new source, so re-ingesting produced duplicate rows.
+#
+# Fix: store paths CANONICAL — relative to the downloaded-dir root, with `/`
+# separators. `business/file.csv` is identical whether the file lives at
+# `C:\Users\...\downloaded\business\file.csv` or `/app/data/downloaded/...`
+# so the UNIQUE constraint catches the duplicate at insert time.
+#
+# Synthetic paths (`__manual:B` for manual entries) are left untouched.
+# Anything that can't be resolved under the downloaded dir falls back to
+# its basename — which still gives the UNIQUE constraint something useful.
+
+def _canonical_source_path(path) -> str:
+    """Return a canonical, host-portable identifier for a source file.
+
+    IDEMPOTENT — once a path has been canonicalised, calling this on the
+    result returns it unchanged. (An earlier version stripped further on
+    each pass, which was a bug.)
+
+    Examples:
+
+      Path('C:/.../downloaded/business/file.csv')  -> 'business/file.csv'
+      Path('/app/data/downloaded/personal/x.xml')  -> 'personal/x.xml'
+      Path('business/file.csv')                    -> 'business/file.csv'  (no-op)
+      Path('__manual:B')                           -> '__manual:B'         (no-op)
+      Path('/some/random/place/file.csv')          -> 'file.csv'           (last-resort)
+    """
+    s = str(path).replace("\\", "/")          # normalise Windows backslashes
+
+    # Synthetic / non-filesystem paths pass through unchanged.
+    if s.startswith("__"):
+        return s
+
+    # Already canonical (relative)? Detect by the absence of any absolute
+    # path marker. Both `business/file.csv` (canonical) and `file.csv`
+    # (basename-only fallback) pass this check, so re-running the migration
+    # never strips further.
+    is_unix_abs    = s.startswith("/")
+    is_windows_abs = len(s) >= 2 and s[1] == ":"
+    if not (is_unix_abs or is_windows_abs):
+        return s
+
+    # Absolute path. Strip everything up to and including the LAST occurrence
+    # of `downloaded/`. Works for both host paths and container paths without
+    # us having to know the actual downloaded-dir absolute path at this layer.
+    marker = "downloaded/"
+    idx = s.rfind(marker)
+    if idx >= 0:
+        return s[idx + len(marker):]
+
+    # Last resort: basename. Survives host moves but loses subdir info, so
+    # in-account uniqueness depends on filenames not colliding.
+    return s.rsplit("/", 1)[-1]
+
 
 def needs_ingest(conn: sqlite3.Connection, path: Path) -> bool:
     """True if file is new or has changed since last ingest."""
     if not path.exists():
         return False
+    canon = _canonical_source_path(path)
     row = conn.execute(
         "SELECT size, mtime FROM source_files WHERE path = ?",
-        (str(path),),
+        (canon,),
     ).fetchone()
     if row is None:
         return True
@@ -389,18 +590,19 @@ def upsert_source(conn: sqlite3.Connection, path: Path,
                   account_code: str, kind: str,
                   ibkr_account: Optional[str] = None) -> int:
     """
-    Insert or replace a source_files row. If a previous row exists for this path,
-    deletes its dependent rows first (CASCADE) and replaces it.
-    Returns the new source_id.
+    Insert or replace a source_files row. The stored path is a CANONICAL
+    (host-portable) form, so the same file under different mounts/hosts
+    never duplicates. See _canonical_source_path for the rules.
     """
     stat = path.stat()
+    canon = _canonical_source_path(path)
     cur = conn.cursor()
-    # Delete prior row for this path (CASCADE removes child rows)
-    cur.execute("DELETE FROM source_files WHERE path = ?", (str(path),))
+    # Delete prior row for this canonical path (CASCADE removes child rows).
+    cur.execute("DELETE FROM source_files WHERE path = ?", (canon,))
     cur.execute(
         """INSERT INTO source_files (path, account_code, kind, ibkr_account, size, mtime, ingested_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (str(path), account_code, kind, ibkr_account, stat.st_size, stat.st_mtime,
+        (canon, account_code, kind, ibkr_account, stat.st_size, stat.st_mtime,
          datetime.utcnow().isoformat()),
     )
     return cur.lastrowid
@@ -433,15 +635,27 @@ def insert_trades(conn: sqlite3.Connection, source_id: int, account_code: str,
             "assetCategory", "currency", "quantity", "tradePrice",
             "proceeds_usd", "commission_usd"]
     rows = _df_records(df, cols, {"source_id": source_id, "account_code": account_code})
+
+    # Derive asset_class from IBKR's assetCategory (positional index 5 in
+    # cols above). CRYPTO → 'crypto'; STK / OPT / FUT / CASH all collapse
+    # to 'stock'. Phoenix doesn't currently model options/futures separately
+    # at the tax layer; if you need that, branch here on assetCategory.
+    ASSET_CATEGORY_IDX = 5
+    enriched = []
+    for r in rows:
+        ac = (r[ASSET_CATEGORY_IDX] or "").upper()
+        klass = "crypto" if ac == "CRYPTO" else "stock"
+        enriched.append(r + (klass,))
+
     conn.executemany(
         """INSERT OR IGNORE INTO trades
            (trade_id, datetime, trade_date, symbol, description, asset_category,
             currency, quantity, trade_price, proceeds_usd, commission_usd,
-            source_id, account_code)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        rows,
+            source_id, account_code, asset_class)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        enriched,
     )
-    return len(rows)
+    return len(enriched)
 
 
 def insert_corporate_actions(conn: sqlite3.Connection, source_id: int,
@@ -568,11 +782,17 @@ def status(conn: sqlite3.Connection) -> dict:
 # ---------- Query helpers (DataFrames matching the loaders' schema) ----------
 
 def get_trades(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:
-    """Return trades for an account in the same column schema the loaders produce."""
+    """Return trades for an account in the same column schema the loaders produce.
+
+    Includes manual entries (source_id NULL) via a LEFT JOIN so they aren't
+    silently dropped. is_manual and asset_class come through as extra columns
+    for the reports / tables to display.
+    """
     df = pd.read_sql_query(
         """SELECT
-              source_id,
-              ('db:' || sf.path) AS source,
+              t.id            AS db_id,
+              t.source_id,
+              COALESCE('db:' || sf.path, 'manual')  AS source,
               t.trade_id      AS tradeID,
               t.datetime      AS dateTime,
               t.trade_date    AS tradeDate,
@@ -583,14 +803,141 @@ def get_trades(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:
               t.quantity      AS quantity,
               t.trade_price   AS tradePrice,
               t.proceeds_usd  AS proceeds_usd,
-              t.commission_usd AS commission_usd
+              t.commission_usd AS commission_usd,
+              t.is_manual     AS is_manual,
+              t.asset_class   AS asset_class
            FROM trades t
-           JOIN source_files sf ON sf.id = t.source_id
+           LEFT JOIN source_files sf ON sf.id = t.source_id
            WHERE t.account_code = ?
            ORDER BY t.datetime, t.id""",
         conn, params=(account_code,),
     )
     return df
+
+
+def _ensure_manual_source(conn: sqlite3.Connection, account_code: str) -> int:
+    """Return the source_files.id of the synthetic 'manual' row for this
+    account, creating it on first use.
+
+    Why: the trades table was created with source_id NOT NULL (legacy DBs).
+    Manual trades can't have a real source file, so we keep one synthetic
+    source_files row per account with path = '__manual:<account_code>'.
+    This row's `mtime` and `size` are zeroed; it can't collide with a real
+    file path. Re-ingests don't touch it (they only delete rows that match
+    a real path that vanished from disk, and `__manual:*` paths never appear
+    on disk)."""
+    from datetime import datetime as _dt
+    pseudo_path = f"__manual:{account_code}"
+    row = conn.execute(
+        "SELECT id FROM source_files WHERE path = ?", (pseudo_path,)
+    ).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute(
+        """INSERT INTO source_files
+           (path, account_code, kind, ibkr_account, size, mtime, ingested_at)
+           VALUES (?, ?, 'manual', NULL, 0, 0, ?)""",
+        (pseudo_path, account_code, _dt.now().isoformat(timespec="seconds")),
+    )
+    return cur.lastrowid
+
+
+def insert_manual_trade(
+    conn: sqlite3.Connection,
+    *,
+    account_code: str,
+    symbol: str,
+    asset_class: str,           # 'stock' or 'crypto'
+    trade_date: str,            # ISO 'YYYY-MM-DD'
+    side: str,                  # 'buy' or 'sell'
+    quantity: float,
+    price: float,
+    currency: str,
+    commission: float = 0.0,
+    description: str = "",
+) -> int:
+    """Insert a user-entered trade. is_manual=1. Uses a synthetic
+    source_files row per account so the legacy NOT NULL constraint on
+    trades.source_id is satisfied. Returns the new row id.
+
+    Convention follows the IBKR import path:
+      buy  → quantity > 0, proceeds < 0 (money flowing out)
+      sell → quantity < 0, proceeds > 0 (money flowing in)
+    The form / API normalises whatever the user typed before calling this.
+    """
+    if asset_class not in ("stock", "crypto"):
+        raise ValueError(f"asset_class must be 'stock' or 'crypto', got {asset_class!r}")
+    if side not in ("buy", "sell"):
+        raise ValueError(f"side must be 'buy' or 'sell', got {side!r}")
+    if quantity <= 0:
+        raise ValueError("quantity must be a positive number")
+    if price < 0:
+        raise ValueError("price cannot be negative")
+
+    signed_qty = quantity if side == "buy" else -quantity
+    # Proceeds sign mirrors the IBKR convention: negative on buy, positive on sell.
+    proceeds = -(signed_qty * price)
+    # Commission is always a cost → negative in the trades.commission_usd col.
+    signed_commission = -abs(commission) if commission else 0.0
+
+    # Map "manual" naming: the column is `commission_usd` but the value is in
+    # whatever currency the user entered. Same with `proceeds_usd`. We don't
+    # auto-convert here — the report layer does FX conversion based on the
+    # `currency` column. Field is named "_usd" for historic reasons; the
+    # actual currency lives in the currency column.
+    manual_source_id = _ensure_manual_source(conn, account_code)
+
+    cur = conn.execute(
+        """INSERT INTO trades
+           (account_code, datetime, trade_date, symbol, description,
+            asset_category, currency, quantity, trade_price,
+            proceeds_usd, commission_usd,
+            source_id, is_manual, asset_class)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+        (
+            account_code,
+            f"{trade_date} 00:00:00",
+            trade_date,
+            symbol.upper().strip(),
+            description.strip() or "Manual entry",
+            "STK" if asset_class == "stock" else "CRYPTO",
+            currency.upper().strip(),
+            signed_qty,
+            float(price),
+            proceeds,
+            signed_commission,
+            manual_source_id,
+            asset_class,
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def delete_manual_trade(conn: sqlite3.Connection, *,
+                        trade_id: int, account_code: str) -> bool:
+    """Delete a manual trade by id. Refuses to touch is_manual=0 rows so an
+    IBKR-imported row can never be deleted through this path. Returns True
+    if a row was deleted, False if not found / not manual / wrong account."""
+    cur = conn.execute(
+        "DELETE FROM trades WHERE id = ? AND account_code = ? AND is_manual = 1",
+        (trade_id, account_code),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def list_manual_trades(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:
+    """All user-entered trades for one account, newest first."""
+    return pd.read_sql_query(
+        """SELECT id, trade_date, symbol, asset_class, currency,
+                  quantity, trade_price, proceeds_usd, commission_usd,
+                  description
+           FROM trades
+           WHERE account_code = ? AND is_manual = 1
+           ORDER BY trade_date DESC, id DESC""",
+        conn, params=(account_code,),
+    )
 
 
 def get_corporate_actions(conn: sqlite3.Connection, account_code: str) -> pd.DataFrame:

@@ -137,13 +137,42 @@ def _load_ecb_history() -> Dict[str, float]:
     return rates
 
 
-def get_eur_usd_rate_for_day(target_date: str) -> Optional[float]:
+def get_eur_usd_rate_for_day(target_date: str, *,
+                              fallback_business_days: int = 7) -> Optional[float]:
     """
     Return the ECB EUR/USD reference rate for a given date ('YYYY-MM-DD').
-    Weekends / holidays return None (no rate published).
+
+    ECB publishes ~once per business day, so weekends, holidays, and any
+    date the ECB skipped have no direct entry. Crypto markets run 24/7 so
+    those dates matter for crypto trades.
+
+    Fallback: walk BACK up to `fallback_business_days` days to find the most
+    recent published rate. This matches the ECB's own convention ("the most
+    recent reference rate") used by financial reporting elsewhere.
+
+    Returns None only if no rate is found within the fallback window (which
+    in practice would mean either a very long ECB outage or a date before
+    ECB euro records began, 1999-01-04).
     """
-    datetime.strptime(target_date, "%Y-%m-%d")  # validate format
-    return _load_ecb_history().get(target_date)
+    from datetime import timedelta
+    base = datetime.strptime(target_date, "%Y-%m-%d")    # validate format
+    history = _load_ecb_history()
+
+    # First try the exact date for the common case.
+    rate = history.get(target_date)
+    if rate is not None:
+        return rate
+
+    # Walk back one day at a time. We use calendar days rather than skipping
+    # weekends explicitly because the history dict only contains business
+    # days anyway, so a hit lands on the right answer in 1-3 steps.
+    for offset in range(1, fallback_business_days + 1):
+        candidate = (base - timedelta(days=offset)).strftime("%Y-%m-%d")
+        rate = history.get(candidate)
+        if rate is not None:
+            return rate
+
+    return None
 
 
 def sync_to_db_incremental(conn) -> dict:

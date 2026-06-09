@@ -1,0 +1,98 @@
+# Local-dev overlay for docker-compose. Compose auto-loads this file on top
+# of docker-compose.yml when it exists, so you don't need any extra flags.
+#
+# Two enhancements for fast iteration:
+#   1. No auth prompt   (blank PHOENIX_AUTH_*)
+#   2. Live code reload (docker compose watch + gunicorn --reload)
+#
+# Usage:
+#   1. Copy this template:
+#        cp docker-compose.override.yml.example docker-compose.override.yml
+#
+#   2. Start with watch mode (FOREGROUND — blocks the shell so you see
+#      sync events as you edit):
+#        docker compose watch
+#
+#      Or start detached without watch (slower iteration, you'd need to
+#      `docker compose restart phoenix` after each .py edit):
+#        docker compose up -d
+#
+#   3. Open http://127.0.0.1:5000/  — no auth prompt.
+#
+#   4. Edit any file in src/. With watch running:
+#        - .py change   → gunicorn reloads the worker (~1s)
+#        - .html change → next page load picks it up (Jinja reads per-request)
+#        - .css / .js   → next page load picks it up (static, no caching)
+#      No image rebuild for any of these.
+#
+#      requirements.txt change → triggers a full rebuild (the action below).
+#
+# This file MUST stay out of git and out of any production deploy. The
+# .gitignore covers it. The GitHub Actions deploy workflow's rsync also
+# explicitly excludes it so a stray override on the laptop can never
+# disable auth on EC2.
+
+services:
+  phoenix:
+    environment:
+      # Blank both auth env vars → basic-auth gate in app.py becomes a
+      # no-op (the check is "if either is empty, skip auth entirely").
+      # Anyone on this laptop can browse the dashboard. Acceptable for
+      # local single-user dev; NEVER do this on a reachable host.
+      PHOENIX_AUTH_USER: ""
+      PHOENIX_AUTH_PASS_HASH: ""
+
+      # Fixed SECRET_KEY so CSRF tokens survive container restarts.
+      # Value deliberately non-secret — only used locally.
+      PHOENIX_SECRET_KEY: "local-dev-fixed-key-not-secure-do-not-use-in-prod"
+
+      # Stop Python from littering src/ with __pycache__ dirs after watch
+      # syncs files in. Less clutter on the host.
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    # Override the gunicorn CMD to add --reload. Worker restarts on .py
+    # file change inside /app. The watch block below keeps /app in sync
+    # with ./src on the host.
+    command: >
+      sh -c "exec gunicorn
+      --bind 0.0.0.0:5000
+      --workers 1
+      --threads 4
+      --timeout 60
+      --reload
+      --access-logfile -
+      --error-logfile -
+      --access-logformat '%(h)s \"%(r)s\" %(s)s %(b)s %(L)ss \"%(f)s\"'
+      app:app"
+
+    # Docker Compose watch mode (requires `docker compose watch` to be
+    # running, NOT just `up`). Each watch entry maps a host path to a
+    # container action:
+    #   sync    — copy changed files into the container, no restart.
+    #             Gunicorn --reload above handles the worker restart.
+    #   rebuild — rebuild the image. Use for files that aren't COPY'd
+    #             at runtime (deps, Dockerfile, etc.).
+    develop:
+      watch:
+        # Live-sync the entire source tree. Excludes are paths INSIDE src/
+        # that you don't want propagating (e.g. local pytest cache).
+        - action: sync
+          path: ./src
+          target: /app
+          ignore:
+            - __pycache__/
+            - .pytest_cache/
+            - "*.pyc"
+
+        # Caddyfile is bind-mounted in production but not local (Caddy is
+        # behind the `prod` profile). Sync it anyway so if you turn on
+        # `--profile prod` locally for testing, edits go live.
+        - action: sync
+          path: ./Caddyfile
+          target: /etc/caddy/Caddyfile
+
+        # Any of these change → full image rebuild needed.
+        - action: rebuild
+          path: ./requirements.txt
+        - action: rebuild
+          path: ./Dockerfile

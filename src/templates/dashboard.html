@@ -71,9 +71,10 @@
     <h2>Add manual trade</h2>
     <p class="muted" style="margin:0 0 14px;font-size:.85rem">
       Use this for trades that didn't come from IBKR (crypto exchanges,
-      paper-trading corrections, family-account moves you want to track here, etc.).
-      Manual rows are flagged in the engine and can be deleted later from the
-      <em>Manual trades</em> tab.
+      paper-trading corrections, family-account moves you want to track here).
+      Manual rows are tagged with <code>is_manual=1</code> in the database so
+      they survive every re-ingest and can be removed via the API or by
+      wiping the DB from the Settings page.
     </p>
     <form id="add-manual-trade-form" onsubmit="submitManualTrade(event)">
       <input type="hidden" name="account_code" id="manual-trade-account-code"/>
@@ -101,7 +102,13 @@
 
       <label class="field">
         <span>Date <span class="muted">(YYYY-MM-DD)</span></span>
-        <input name="trade_date" type="date" required/>
+        <input name="trade_date" type="text" required
+               pattern="\d{4}-\d{2}-\d{2}"
+               maxlength="10"
+               placeholder="2026-06-09"
+               autocomplete="off"
+               inputmode="numeric"
+               title="Enter as YYYY-MM-DD, e.g. 2025-11-20"/>
       </label>
 
       <label class="field">
@@ -126,7 +133,7 @@
 
       <label class="field">
         <span>Description <span class="muted">(optional)</span></span>
-        <input name="description" maxlength="200" placeholder="Kraken — limit order"/>
+        <input name="description" maxlength="200" placeholder="Kraken, limit order"/>
       </label>
 
       <div class="actions">
