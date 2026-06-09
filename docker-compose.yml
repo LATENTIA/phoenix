@@ -95,6 +95,15 @@ services:
       - "443:443"                   # HTTPS
       - "443:443/udp"               # HTTP/3 over QUIC
 
+    # Explicit DNS servers. Ubuntu hosts use 127.0.0.53 (systemd-resolved)
+    # which Docker inherits into the container's resolv.conf but is NOT
+    # reachable from inside the container's network namespace. Without this
+    # override, Caddy cannot resolve acme-v02.api.letsencrypt.org to fetch
+    # the TLS cert, and the deploy hangs in retry-loop forever.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
     environment:
       PHOENIX_DOMAIN: ${PHOENIX_DOMAIN:?PHOENIX_DOMAIN must be set in .env for prod}
       CADDY_EMAIL: ${CADDY_EMAIL:-}
