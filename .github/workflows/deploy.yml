@@ -55,16 +55,66 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ----- 2. Set up SSH from the secret key -----
-      - name: Configure SSH
+      # ----- 1b. Preflight: fail fast with actionable errors -----
+      # Without this, missing/empty secrets or a stripped binary in the runner
+      # surface as a generic `exit code 1` in some later step. Validating
+      # everything up front means failures point straight at the cause.
+      - name: Preflight checks
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          set -euo pipefail
+
+          # Required secrets must be present and non-empty.
+          [ -n "${EC2_HOST:-}" ]    || { echo "FAIL: missing GitHub Secret EC2_HOST";    exit 2; }
+          [ -n "${EC2_USER:-}" ]    || { echo "FAIL: missing GitHub Secret EC2_USER";    exit 2; }
+          [ -n "${EC2_SSH_KEY:-}" ] || { echo "FAIL: missing GitHub Secret EC2_SSH_KEY"; exit 2; }
+
+          # Required tools on the runner. ubuntu-latest ships all three but a
+          # future change of runner image could break us silently otherwise.
+          command -v ssh   >/dev/null || { echo "FAIL: ssh not found on runner";   exit 2; }
+          command -v scp   >/dev/null || { echo "FAIL: scp not found on runner";   exit 2; }
+          command -v rsync >/dev/null || { echo "FAIL: rsync not found on runner"; exit 2; }
+
+          echo "Preflight OK: all required secrets and tools present."
+
+      # ----- 2. Set up SSH from the secret key + verify connectivity -----
+      - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          # Write the key. The secret is the entire PEM, including BEGIN/END lines.
-          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+
+          # Normalize possible CRLF in pasted PEM (common when the secret value
+          # is copy-pasted from a Windows terminal or PowerShell output).
+          # ssh refuses keys with CRLF line endings — the file looks valid but
+          # `ssh -i` errors with "Permissions ... are too open" or just rejects
+          # the key silently.
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pin the host key on first contact so subsequent steps don't prompt.
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Deterministic known_hosts entry. The timeout prevents hangs if the
+          # remote host stops responding mid-scan. Removed `2>/dev/null` so we
+          # see the actual error if scanning fails.
+          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+          # Connectivity / authentication probe. BatchMode=yes refuses any
+          # password prompt (which would otherwise hang the runner indefinitely
+          # while waiting for stdin that never comes). If this fails, the
+          # remaining deploy steps would all fail in confusing ways — better
+          # to surface the SSH problem here, once, with a clear message.
+          ssh -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o StrictHostKeyChecking=yes \
+              -i ~/.ssh/deploy_key \
+              "$EC2_USER@$EC2_HOST" \
+              'echo SSH OK from $(hostname)'
 
       # ----- 3. Sync source to EC2 (preserve user data) -----
       - name: Rsync source to EC2
