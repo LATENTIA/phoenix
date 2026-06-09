@@ -1,0 +1,207 @@
+name: Deploy to EC2
+
+# When this fires:
+#   - Every push to `main`.
+#   - Manual run from the Actions tab (workflow_dispatch).
+#
+# What it does, in order:
+#   1. rsync the source code to the EC2 instance.
+#      Excludes anything sensitive or user-generated: .env*, .git, data.db,
+#      downloaded/, logs/, phoenix-data/. Those either don't exist in CI or
+#      live on the EC2 host already and must not be overwritten.
+#   2. Re-render /home/.../phoenix/.env.runtime on EC2 from GitHub Secrets.
+#      $ characters in the auth hash are escaped to $$ before writing so
+#      Docker Compose interpolation doesn't mangle them.
+#   3. Ensure the persistent data directory exists on EC2 (chowned to UID 1000
+#      which matches the `phoenix` user inside the container).
+#   4. `docker compose up -d --build` — rebuilds the image with the new code
+#      and restarts the container. The bind-mounted data dir is reattached
+#      to the new container automatically, so trade history, accounts,
+#      withholdings, etc. all survive the redeploy untouched.
+#
+# Data-protection guarantee:
+#   The directory referenced by PHOENIX_DATA_DIR on the EC2 host (default
+#   /var/phoenix-data) is NEVER written to or deleted by this workflow.
+#   It's bind-mounted into the container's /app/data at runtime. Container
+#   recreate → bind mount reattaches → data is exactly where it was.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Don't let two concurrent deploys race. Queue them instead of cancelling.
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + restart Phoenix on EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Optional: tie this to a "production" GitHub Environment so you can add a
+    # required-reviewer protection rule later. Comment out if not using one.
+    # environment: production
+
+    env:
+      # Where the source lives on the EC2 box. Stays inside the deploy user's
+      # home dir; the persistent data dir is elsewhere (see PHOENIX_DATA_DIR).
+      DEPLOY_DIR: /home/${{ secrets.EC2_USER }}/phoenix
+
+    steps:
+      # ----- 1. Get the code -----
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----- 2. Set up SSH from the secret key -----
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # Write the key. The secret is the entire PEM, including BEGIN/END lines.
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key on first contact so subsequent steps don't prompt.
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ----- 3. Sync source to EC2 (preserve user data) -----
+      - name: Rsync source to EC2
+        run: |
+          # --delete removes files on EC2 that no longer exist in the repo
+          # (e.g. a deleted module). But the --exclude patterns make sure
+          # user data and local config never get touched by --delete either.
+          rsync -avz --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.venv/' \
+            --exclude='.claude/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='.idea/' \
+            --exclude='.vscode/' \
+            --exclude='phoenix-data/' \
+            --exclude='data.db' \
+            --exclude='data.db-*' \
+            --exclude='downloaded/' \
+            --exclude='logs/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='requested.txt' \
+            --exclude='*.bak' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$DEPLOY_DIR/"
+
+      # ----- 4. Render .env.runtime on EC2 from GitHub Secrets -----
+      # GitHub Secrets store the RAW values (single $ in the hash). We escape
+      # them here so Docker Compose's env_file interpolation doesn't eat
+      # anything. Doing it in Python avoids bash/shell escaping pitfalls.
+      - name: Render .env.runtime
+        env:
+          PHX_USER:    ${{ secrets.PHOENIX_AUTH_USER }}
+          PHX_HASH:    ${{ secrets.PHOENIX_AUTH_PASS_HASH }}
+          PHX_KEY:     ${{ secrets.PHOENIX_SECRET_KEY }}
+          PHX_DATA:    ${{ secrets.PHOENIX_DATA_DIR }}
+          PHX_BACKEND: ${{ secrets.PHOENIX_SECRETS_BACKEND }}
+        run: |
+          python3 <<'PY' > .env.runtime.tmp
+          import os, sys
+
+          def esc(v: str) -> str:
+              # Docker Compose treats $ as variable substitution in env_file
+              # values. Double it so the literal $ survives to the container.
+              return (v or "").replace("$", "$$")
+
+          required = ("PHX_USER", "PHX_HASH", "PHX_KEY")
+          missing = [k for k in required if not os.environ.get(k)]
+          if missing:
+              print(
+                  f"ERROR: GitHub Secrets missing: {', '.join(missing)}. "
+                  "Add them in repo Settings → Secrets and variables → Actions.",
+                  file=sys.stderr,
+              )
+              sys.exit(2)
+
+          lines = [
+              f"PHOENIX_AUTH_USER={os.environ['PHX_USER']}",
+              f"PHOENIX_AUTH_PASS_HASH={esc(os.environ['PHX_HASH'])}",
+              f"PHOENIX_SECRET_KEY={esc(os.environ['PHX_KEY'])}",
+              f"PHOENIX_DATA_DIR={os.environ.get('PHX_DATA') or '/var/phoenix-data'}",
+              f"PHOENIX_SECRETS_BACKEND={os.environ.get('PHX_BACKEND') or 'plaintext'}",
+          ]
+          print("\n".join(lines))
+          PY
+
+          # Upload over SSH with restrictive permissions, then wipe the local copy.
+          scp -i ~/.ssh/deploy_key .env.runtime.tmp \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$DEPLOY_DIR/.env.runtime"
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "chmod 600 $DEPLOY_DIR/.env.runtime"
+          rm .env.runtime.tmp
+
+      # ----- 5. Make sure the persistent data dir exists on EC2 -----
+      - name: Ensure data directory exists on EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<'EOF'
+          set -e
+          DATA_DIR="${PHOENIX_DATA_DIR:-/var/phoenix-data}"
+          if [ ! -d "$DATA_DIR" ]; then
+            echo "first-time setup: creating $DATA_DIR"
+            sudo mkdir -p "$DATA_DIR/downloaded" "$DATA_DIR/logs"
+            sudo chown -R 1000:1000 "$DATA_DIR"
+            sudo chmod 750 "$DATA_DIR"
+          else
+            echo "$DATA_DIR exists, preserving contents"
+            # Defensive chown — covers the case where someone touched perms by hand.
+            sudo chown -R 1000:1000 "$DATA_DIR"
+          fi
+          EOF
+
+      # ----- 6. Rebuild and restart the container -----
+      # We do NOT run `docker compose down` first. `up -d --build` is
+      # zero-downtime when the image hasn't changed and near-zero (~1s) when
+      # it has. The bind mount reattaches automatically, so phoenix-data
+      # stays mounted across container recreates.
+      - name: Build image and (re)start container
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<EOF
+          set -e
+          cd "$DEPLOY_DIR"
+          docker compose up -d --build
+          # Brief settle, then dump status + last log lines for visibility in
+          # the GitHub Actions UI.
+          sleep 4
+          docker compose ps
+          echo "----- last 30 log lines -----"
+          docker compose logs --tail 30 phoenix
+          EOF
+
+      # ----- 7. Sanity check: the running container answers HTTP -----
+      - name: Smoke test
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash <<'EOF'
+          set -e
+          # Use the container-internal port (not the host port) so this works
+          # even when EC2 doesn't expose 5000 to the world (which it shouldn't).
+          # We expect 401 from /license without credentials — that proves the
+          # auth gate is on and the route handler is reachable.
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/license || true)
+          if [ "$status" = "401" ]; then
+            echo "OK: /license returned 401 (auth gate working)"
+          elif [ "$status" = "200" ]; then
+            echo "WARN: /license returned 200 — auth gate is OFF on EC2"
+            echo "      Check that PHOENIX_AUTH_USER + PHOENIX_AUTH_PASS_HASH"
+            echo "      are set in GitHub Secrets and made it to .env.runtime."
+            exit 1
+          else
+            echo "FAIL: /license returned $status (container down or misconfigured)"
+            exit 1
+          fi
+          EOF
+
+      # ----- 8. Always clean up the SSH key, even if a step failed -----
+      - name: Wipe SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

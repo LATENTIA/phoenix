@@ -209,6 +209,18 @@ python src/app.py
 
 Or `cd src && python app.py`. Either works.
 
+**C. EC2 via GitHub Actions** (push-to-deploy)
+
+See [`docs/ec2-setup.md`](docs/ec2-setup.md) for the one-time setup
+(provision the box, configure GitHub Secrets, configure SSH). After that,
+every push to `main` triggers `.github/workflows/deploy.yml` which:
+
+1. rsyncs the source to EC2.
+2. Renders `.env.runtime` on EC2 from your GitHub Secrets (with `$` escaping handled automatically).
+3. Rebuilds the Docker image and recreates the container.
+4. **Never touches** the host's `/var/phoenix-data/` directory, so your
+   trade history, accounts, and dividend records survive every deploy.
+
 Open http://127.0.0.1:5000. Click **⚡ Load data** to download your statement and ingest it.
 Reports regenerate automatically.
 
