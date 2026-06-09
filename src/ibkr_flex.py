@@ -218,7 +218,18 @@ def main(argv=None):
     parser.add_argument("--poll", type=int, default=5)
     args = parser.parse_args(argv)
 
-    token = args.token
+    # Precedence for the Flex token:
+    #   1. --token CLI flag        (kept for backward compat; emits a warning)
+    #   2. IBKR_FLEX_TOKEN env var (preferred — the dashboard passes it this way)
+    #   3. ACCOUNTS[account]['token_env'] env var (legacy CLI-only path)
+    # Pulling from env keeps the token out of /proc/<pid>/cmdline, where any
+    # other process on the box could read it. The dashboard's run_subprocess
+    # already injects it as IBKR_FLEX_TOKEN via `env_extra`.
+    if args.token:
+        print("[flex] WARNING: --token on the command line is visible to other "
+              "processes via /proc. Prefer IBKR_FLEX_TOKEN env var.",
+              file=sys.stderr)
+    token = args.token or os.environ.get("IBKR_FLEX_TOKEN")
     query_id = args.query_id
     out_path = args.out
 

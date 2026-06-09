@@ -12,6 +12,7 @@ Tables:
   fx_rates                    — ECB EUR/USD daily
 """
 
+import os
 import sqlite3
 import sys
 from datetime import datetime
@@ -21,7 +22,23 @@ from typing import Optional
 import pandas as pd
 
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data.db"
+# DB location.
+#   Default: <project root>/data.db (backwards compatible with every install
+#            that ran the app outside Docker).
+#   Override via PHOENIX_DB_PATH for containerised / EC2 deploys, where the
+#   DB should live on a mounted volume outside the container, not inside the
+#   project tree. The Dockerfile sets this to /app/data/data.db.
+#
+# We never auto-create the parent directory here. That's app.py's job at
+# startup (see _ensure_data_dirs) so a typo'd env var fails loud rather than
+# silently creating a wrong directory somewhere.
+DB_PATH = Path(
+    os.environ.get("PHOENIX_DB_PATH")
+    # src/core/db.py → parent.parent.parent = project root.
+    # data.db lives at the project root for legacy non-Docker installs.
+    # Docker always overrides this via the PHOENIX_DB_PATH env var.
+    or (Path(__file__).resolve().parent.parent.parent / "data.db")
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (

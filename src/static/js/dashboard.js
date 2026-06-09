@@ -3,6 +3,23 @@
 
 const viewer = document.getElementById('viewer');
 
+// ---------- CSRF wrapper ----------
+// Every POST / PUT / PATCH / DELETE goes through fetchCsrf() which auto-injects
+// the X-CSRFToken header read from the <meta name="csrf-token"> tag rendered
+// by Flask-WTF. GET requests pass through unchanged (they're CSRF-exempt).
+const CSRF_TOKEN = (
+  document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+);
+function fetchCsrf(url, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD') return fetch(url, opts);
+  const headers = new Headers(opts.headers || {});
+  if (CSRF_TOKEN && !headers.has('X-CSRFToken')) {
+    headers.set('X-CSRFToken', CSRF_TOKEN);
+  }
+  return fetch(url, { ...opts, headers });
+}
+
 // ---------- Report tabs ----------
 function showReport(kind) {
   document.querySelectorAll('.tab').forEach(t => {
@@ -52,7 +69,7 @@ async function loadData(code) {
   log.textContent = '> Download Flex + ingest into DB\n';
   const t = toast('Downloading from IBKR + ingesting into DB...', {spin: true, duration: 0});
   try {
-    const res = await fetch(`/run/download/${code}`, { method: 'POST' });
+    const res = await fetchCsrf(`/run/download/${code}`, { method: 'POST' });
     const data = await res.json();
     renderLog(log, data, true);
     dismissToast(t);
@@ -79,7 +96,7 @@ async function fetchMarks(code) {
   log.textContent = '> Refresh 2025-12-31 closing prices from Yahoo\n';
   const t = toast('Fetching year-end marks from Yahoo...', {spin: true, duration: 0});
   try {
-    const res = await fetch(`/run/fetch_marks/${code}`, { method: 'POST' });
+    const res = await fetchCsrf(`/run/fetch_marks/${code}`, { method: 'POST' });
     const data = await res.json();
     renderLog(log, data, true);
     dismissToast(t);
@@ -126,7 +143,7 @@ async function submitAddAccount(ev) {
   const data = Object.fromEntries(new FormData(form).entries());
   const t = toast('Creating account...', {spin: true, duration: 0});
   try {
-    const res = await fetch('/accounts/add', {
+    const res = await fetchCsrf('/accounts/add', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
@@ -156,7 +173,7 @@ async function confirmDeleteAccount(id, name) {
   )) return;
   const t = toast(`Deleting "${name}"...`, {spin: true, duration: 0});
   try {
-    const res = await fetch('/accounts/' + id, { method: 'DELETE' });
+    const res = await fetchCsrf('/accounts/' + id, { method: 'DELETE' });
     const data = await res.json();
     dismissToast(t);
     if (data.ok) {
@@ -196,7 +213,7 @@ async function doReset() {
   closeConfirm();
   const t = toast('Wiping database...', {spin: true, duration: 0});
   try {
-    const res = await fetch('/db/reset', { method: 'POST' });
+    const res = await fetchCsrf('/db/reset', { method: 'POST' });
     const data = await res.json();
     dismissToast(t);
     if (data.ok) {

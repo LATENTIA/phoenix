@@ -1,39 +1,199 @@
-# ---------- Sensitive — NEVER commit ----------
-# IBKR Flex tokens are stored in data.db. Trade history is highly personal.
+# Phoenix .gitignore
+#
+# The repo is source-available under a non-commercial license, but every
+# user runs it against their own brokerage data. NOTHING that holds personal
+# trade history, authentication material, or cloud credentials should ever
+# end up on GitHub. This file is the safety net for "I accidentally git add'd
+# a sensitive thing".
+#
+# Sections, in order of how-bad-if-leaked:
+#   1. Auth + cloud credentials  (immediate compromise)
+#   2. User data                 (trade history, broker statements, logs)
+#   3. Local databases           (any *.db / *.sqlite at the project root)
+#   4. Personal notes            (scratch files, TODOs, request lists)
+#   5. Build / cache artefacts   (annoying-but-harmless)
+#   6. Editor / OS junk          (cosmetic)
+#   7. P&L recovery audit trail  (specific to this repo's history)
+
+
+# ============================================================================
+# 1. AUTH + CLOUD CREDENTIALS — leaking any of these is catastrophic.
+# ============================================================================
+
+# Real env files (auth hash, Flask SECRET_KEY, IBKR tokens). The .example
+# template is the ONLY env file that ships.
+.env
+.env.*
+!.env.runtime.example
+
+# Generic credential / secret file names commonly created during dev.
+*.token
+*_token
+*.credentials
+.credentials
+.secrets
+secrets.json
+secrets.yml
+secrets.yaml
+secrets.toml
+
+# Cloud provider credentials. Never commit these even if you're certain
+# they're scoped/expired — leaked tokens get harvested in minutes.
+.aws/
+aws-credentials
+aws.env
+.gcp/
+gcp-key*.json
+service-account*.json
+.azure/
+
+# SSH / GPG / TLS material.
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_dsa
+*.gpg
+*.asc
+*.kdbx
+
+
+# ============================================================================
+# 2. USER DATA — trade history, raw IBKR exports, run logs.
+#    All gitignored even when they live inside the project tree.
+# ============================================================================
+
+# Raw broker statements (XML from Flex Web Service, CSV from Activity Statement).
+downloaded/
+
+# App + ingest logs. Tokens are now redacted at the source, but the log file
+# still contains trade history, account IDs, IPs, and timing. Keep out of git.
+logs/
+
+# Docker-mode user data directory. Holds data.db, downloaded/, logs/ inside
+# when running via docker compose. Bind-mounted from the host.
+phoenix-data/
+
+
+# ============================================================================
+# 3. LOCAL DATABASES — any *.db / *.sqlite is presumed to hold trade data.
+# ============================================================================
+
+# The canonical Phoenix DB (and SQLite's WAL / journal sidecars).
 data.db
 data.db-journal
 data.db-wal
 data.db-shm
 
-# Raw IBKR exports (XML / CSV statements)
-downloaded/
+# Catch-all for ad-hoc SQLite files dropped at the project root.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 
-# Logs may contain tokens passed via subprocess args
-logs/
 
-# ---------- Editor / runtime artifacts ----------
-.claude/
+# ============================================================================
+# 4. PERSONAL NOTES — author's scratch files, request lists, local TODOs.
+# ============================================================================
+
+requested.txt
+notes.local.md
+notes-*.md
+TODO.local.md
+TODO.local.txt
+scratch.*
+scratch/
+
+
+# ============================================================================
+# 5. BUILD / CACHE / TEST ARTEFACTS — regenerable, no value in version control.
+# ============================================================================
+
+# Python bytecode and caches
 __pycache__/
+*.pyc
 *.pyo
-*.swp
-*~
-*.tmp.*
+*.pyd
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test + lint caches
+.pytest_cache/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+
+# ============================================================================
+# 6. EDITOR / OS JUNK
+# ============================================================================
+
+# Editors
 .idea/
 .vscode/
+*.swp
+*.swo
+*.swn
+*~
+
+# Backups / temporaries created by Claude or editors
+*.bak
+*.backup
+*.orig
+*.tmp.*
+
+# Claude Code artefacts (assistant session metadata, never useful in repo)
+.claude/
+
+# OS-level
 .DS_Store
 Thumbs.db
-.venv/
+desktop.ini
 
-# ---------- Python bytecode ----------
-*.pyc
+# Local Docker compose overrides (often used for dev-only mounts/ports)
+docker-compose.override.yml
+docker-compose.override.yaml
+docker-compose.local.yml
+docker-compose.local.yaml
 
-# ---------- Local backups ----------
-*.bak
 
-# ---------- P&L recovery artifacts (kept locally for audit, not in git) ----------
-# After the 2026-04-25 truncation incident, `reports/pnl.py` was rebuilt from scratch
-# and verified output-identical to these artifacts. They live on disk as a personal
-# audit trail but should not ship in the repo.
+# ============================================================================
+# 7. P&L RECOVERY AUDIT TRAIL
+# ============================================================================
+# After the 2026-04-25 truncation incident, reports/pnl.py was rebuilt from
+# scratch and verified output-identical to these reference artefacts. They
+# live on disk as a personal audit trail but should NEVER ship in the repo.
+# Paths exist for both the pre- and post-src/-restructure layouts.
 reports/_pnl_legacy.pyc
 reports/_pnl_decompiled_reference.txt
-requested.txt
+src/reports/_pnl_legacy.pyc
+src/reports/_pnl_decompiled_reference.txt

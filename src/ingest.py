@@ -20,7 +20,14 @@ from core import ecb_fx_parser
 from core import loaders
 
 
-DOWNLOAD_DIR = Path(__file__).resolve().parent / "downloaded"
+# Project root is one level above src/. The downloaded/ dir lives at the
+# project root for backwards compat with non-Docker installs. Docker
+# overrides this via PHOENIX_DOWNLOADED_DIR at runtime.
+import os as _os
+DOWNLOAD_DIR = Path(
+    _os.environ.get("PHOENIX_DOWNLOADED_DIR")
+    or (Path(__file__).resolve().parent.parent / "downloaded")
+)
 
 
 def _accounts_map() -> dict[str, str]:

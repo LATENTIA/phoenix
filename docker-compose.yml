@@ -1,0 +1,66 @@
+# docker-compose.yml
+#
+# Local Docker workflow for Phoenix. Mirrors the EC2 deployment model:
+# env-var driven config, persistent user data on a HOST volume outside the
+# image (and outside the project tree), no secrets in the image.
+#
+# Quickstart:
+#   1. cp .env.runtime.example .env.runtime
+#   2. Edit .env.runtime (at minimum: PHOENIX_AUTH_USER, PHOENIX_AUTH_PASS_HASH,
+#      PHOENIX_SECRET_KEY). The file is gitignored. The $ characters in the
+#      password hash do NOT need escaping — env_file values are read as-is.
+#   3. If you have a pre-existing data.db / downloaded/ / logs/ from running
+#      Phoenix outside Docker:
+#         python scripts/migrate-to-docker.py
+#      This copies them into ./phoenix-data/ in one shot. Idempotent.
+#   4. docker compose up --build
+#   5. Open http://127.0.0.1:5000/ in your browser.
+#
+# Where does your data live?
+#   On the host: ${PHOENIX_DATA_DIR:-./phoenix-data}/
+#                (defaults to a subdirectory of the project, but you can point
+#                it at /mnt/ebs/phoenix-data on EC2 and the image is unchanged)
+#   In the container: /app/data/
+#                (PHOENIX_DB_PATH, PHOENIX_DOWNLOADED_DIR, PHOENIX_LOG_DIR
+#                all set to subpaths of /app/data in the Dockerfile)
+#
+# `docker compose down` stops the container. Data on the host stays.
+# `docker compose down -v` does the same thing here (we use bind mounts,
+#  not anonymous Docker volumes, so there's nothing for -v to delete).
+
+services:
+  phoenix:
+    build: .
+    image: phoenix:local
+    container_name: phoenix
+
+    # Bind explicitly to 127.0.0.1 on the host so Docker doesn't quietly
+    # expose Phoenix on your LAN/Wi-Fi. Inside the container Flask listens
+    # on 0.0.0.0:5000 (PHOENIX_BIND_HOST set in the Dockerfile).
+    # On EC2, change this to "5000:5000" and let the ALB/Nginx reach it.
+    ports:
+      - "127.0.0.1:5000:5000"
+
+    # Runtime secrets / config for the container. Read AS-IS by Docker,
+    # no variable substitution — so $ characters in your password hash are
+    # safe and never need escaping.
+    #
+    # We deliberately do NOT use the conventional `.env` filename here.
+    # Compose auto-loads `.env` for substitution INSIDE docker-compose.yml,
+    # which is a separate (interpolated) pass and would mangle $ characters
+    # in values. Two files = two purposes, no collisions.
+    env_file:
+      - .env.runtime
+
+    # The ONLY persistent state: one host directory mounted at /app/data.
+    # The default `./phoenix-data` sits next to the repo but outside the app
+    # code. Override PHOENIX_DATA_DIR in .env or in your shell to point at
+    # any host path you like (e.g. /mnt/ebs/phoenix-data on EC2).
+    #
+    # Note the LICENSE file is read-only mounted so /license can render it
+    # even if you edit it on the host without rebuilding the image.
+    volumes:
+      - ${PHOENIX_DATA_DIR:-./phoenix-data}:/app/data
+      - ./LICENSE:/app/LICENSE:ro
+
+    restart: unless-stopped

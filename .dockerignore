@@ -1,0 +1,67 @@
+# Files NOT to copy into the Docker image.
+#
+# Note the Dockerfile now does `COPY src /app`, so anything outside src/ is
+# already excluded from the build context that gets into the image. This
+# file mostly exists to keep the daemon-side build context small (faster
+# `docker compose build`) and to defensively block things that might creep
+# into src/ during development (pycache, .DS_Store).
+
+# Virtualenv (we install fresh inside the image)
+.venv/
+venv/
+
+# Local SQLite DB and its journal files (lives at project root; bind-mounted
+# at runtime via docker-compose.yml).
+data.db
+data.db-journal
+data.db-wal
+data.db-shm
+
+# Raw broker exports — host-only.
+downloaded/
+
+# Logs — host-only.
+logs/
+
+# Real env file with secrets. Only the .example template ships in the image.
+.env
+.env.*
+!.env.runtime.example
+
+# Docker-mode user data dir (host bind mount at runtime).
+phoenix-data/
+
+# Git internals
+.git/
+.gitignore
+
+# Python cache + build artefacts (defensive — would only show up if cached
+# in src/ on the host).
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# IDE / editor / OS junk
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+*.tmp.*
+.claude/
+
+# Backup files
+*.bak
+
+# Host-side directories not needed at runtime (the LICENSE file IS needed
+# but it's bind-mounted in docker-compose.yml, not baked into the image).
+docs/
+scripts/
+README.md
+LICENSE
+Dockerfile
+docker-compose.yml

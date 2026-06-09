@@ -185,9 +185,29 @@ Run the app once, click **＋ Add account**, paste the token + query ID. Done.
 
 ### 3. Run
 
+Two ways to run Phoenix:
+
+**A. Docker (recommended for any non-trivial deploy)**
+
 ```bash
-python app.py
+cp .env.runtime.example .env.runtime
+# Edit .env.runtime — generate password hash + secret key per the comments.
+# Remember to double every $ in the hash (Compose interpolation).
+
+docker compose up --build
 ```
+
+Open http://127.0.0.1:5000 → log in with the credentials you set in `.env.runtime`.
+
+**B. Local Python (Windows/macOS/Linux without Docker)**
+
+The application source now lives in `src/`. Run it from the project root with:
+
+```bash
+python src/app.py
+```
+
+Or `cd src && python app.py`. Either works.
 
 Open http://127.0.0.1:5000. Click **⚡ Load data** to download your statement and ingest it.
 Reports regenerate automatically.
@@ -255,17 +275,30 @@ attorney.
 
 ## 🤝 Contributing
 
-Issues and pull requests welcome. The codebase is intentionally compact:
+Issues and pull requests welcome. The codebase is intentionally compact and follows a `src/` layout:
 
-- `core/` — DB, loaders, FX rates, account management
-- `reports/` — TOB, P&L, CGT report builders
-- `templates/` + `static/` — the UI
-- `app.py` — Flask routes
-- `ibkr_flex.py` — IBKR Flex Web Service client
-- `ingest.py` — ETL entry point
+```
+.
+├── src/                    # All application code
+│   ├── app.py              # Flask routes
+│   ├── ingest.py           # ETL entry point
+│   ├── ibkr_flex.py        # IBKR Flex Web Service client
+│   ├── core/               # DB, loaders, FX rates, account / secrets management
+│   ├── reports/            # TOB, P&L, CGT, Dividends, Methodology builders
+│   ├── templates/          # Jinja templates (base + per-report)
+│   └── static/             # CSS + JS
+├── scripts/                # One-off tooling (migrate-to-docker.py)
+├── docs/                   # Architecture notes + mockups
+├── phoenix-data/           # User data dir (gitignored, mounted into Docker)
+├── Dockerfile              # python:3.12-slim + gunicorn
+├── docker-compose.yml      # Single-service local + EC2 deploy
+├── .env.runtime.example    # Template — copy to .env.runtime and fill in
+├── LICENSE                 # Source-available, non-commercial
+└── requirements.txt        # Pinned deps
+```
 
 For a tour of the math (FIFO matching, FX-accurate Method 2, basis reset, exemption rollover bank,
-symbol-change detection), see the docstrings in `reports/cgt.py` and `reports/pnl.py`.
+symbol-change detection), see the docstrings in `src/reports/cgt.py` and `src/reports/pnl.py`.
 
 ---
 
