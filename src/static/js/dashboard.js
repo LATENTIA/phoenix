@@ -20,6 +20,12 @@ function fetchCsrf(url, opts = {}) {
   return fetch(url, { ...opts, headers });
 }
 
+// Sortable tables — the makeAllTablesSortable() function lives in
+// sortable.js (loaded by dashboard.html BEFORE this file). Same file is
+// loaded by share_dashboard.html so the read-only view gets the same
+// header-click behaviour.
+
+
 // ---------- Report tabs ----------
 //
 // Phase 2 removes the iframe. Reports are now fetched as partial HTML
@@ -34,6 +40,17 @@ function showReport(kind) {
   document.querySelectorAll('.nav-item, .tab').forEach(t => {
     t.classList.toggle('active', t.dataset.report === kind);
   });
+
+  // Reflect the active tab in the URL so a browser refresh (or a copied
+  // link) lands the user on the same tab instead of the default TOB.
+  // `replaceState` — not `pushState` — because a per-click history entry
+  // would make the back button walk through every tab visited before
+  // leaving the page, which is disorienting for a dashboard.
+  try {
+    const u = new URL(window.location);
+    u.searchParams.set('report', kind);
+    history.replaceState({report: kind}, '', u.toString());
+  } catch (e) { /* older browsers — no-op */ }
 
   // Year-end marks are only meaningful for the personal CGT 2026+ basis
   // reset. Reveal the sidebar button only when the user is on that tab.
@@ -80,6 +97,8 @@ function showReport(kind) {
       if (kind !== 'performance') {
         document.body.classList.remove('isolated-tab');
       }
+      // Make every table in the freshly injected partial click-sortable.
+      makeAllTablesSortable();
     })
     .catch(err => {
       console.error('showReport failed:', err);
@@ -329,6 +348,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // server-side: the partial ships with `data-initial-tab="performance"`
     // on its .report-shell wrap, and pnl.js reads it and activates the
     // right panel at parse time. Nothing to do here.
+    // Make every table in the server-rendered partial click-sortable.
+    makeAllTablesSortable();
     return;
   }
   // No initial paint — fall back to "open the first non-empty tab".

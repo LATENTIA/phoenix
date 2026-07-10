@@ -264,14 +264,18 @@
           <th>Date</th><th>Symbol</th><th>Side</th>
           <th class="num">Quantity</th><th class="num">Price (USD)</th>
           <th class="num">Proceeds (USD)</th><th class="num">Commission (USD)</th>
-          <th>Source</th>
+          {# data-col="source" is used to hide this column in the share
+             view — accountants don't need to see internal file paths. #}
+          <th data-col="source">Source</th>
         </tr></thead>
         <tbody>{{ all_trades_rows | safe }}</tbody>
       </table>
     </div>
   </div>
 
-  <details style="margin-top:24px"><summary class="muted">Data sources</summary>
+  {# .data-sources exposes the internal file paths (e.g. business_2026.xml).
+     Hidden in share view — the accountant doesn't need that plumbing. #}
+  <details class="data-sources" style="margin-top:24px"><summary class="muted">Data sources</summary>
     <ul class="muted">{{ sources_list | safe }}</ul>
   </details>
 </div>{# /.report-shell #}

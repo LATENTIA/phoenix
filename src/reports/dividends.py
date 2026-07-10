@@ -245,7 +245,7 @@ def annual_summary(paired: pd.DataFrame) -> pd.DataFrame:
             "belgian_tax_after_eur": belgian_tax_after,
             "after_all_tax_eur": after_all_tax,
         })
-    return pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("year", ascending=False).reset_index(drop=True)
 
 
 def per_symbol_summary(paired: pd.DataFrame) -> pd.DataFrame:

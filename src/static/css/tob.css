@@ -107,6 +107,9 @@ table.trades tbody tr:hover{background:rgba(56,189,248,0.06)}
    sits on the left and the values sit on the right with empty space between. */
 table.trades thead th.num,
 table.trades tbody td.num{text-align:right}
+
+/* Sortable column header styling is now shared across every report —
+   see dashboard.css → "Sortable table headers". */
 td.check-col,th.check-col{width:40px;text-align:center;padding:6px}
 input[type="checkbox"]{accent-color:var(--accent);cursor:pointer;width:16px;height:16px}
 

@@ -82,8 +82,11 @@
   </style>
 </head>
 {# Accent colour follows the CURRENTLY-selected account's type, so switching
-   pills also recolours the chrome (matches the main dashboard's behaviour). #}
-<body style="--accent-color: var(--{{ accounts[current_code].type }})">
+   pills also recolours the chrome (matches the main dashboard's behaviour).
+   `share-view` class marks the whole document as read-only for accountants —
+   used by CSS to hide bits that expose internal plumbing (Source column,
+   Data-sources file paths) that they don't need to see. #}
+<body class="share-view" style="--accent-color: var(--{{ accounts[current_code].type }})">
 
 <div class="container">
   <div class="topbar">
@@ -153,6 +156,10 @@
   </footer>
 </div>
 
+{# sortable.js exposes makeAllTablesSortable() — same util the main
+   dashboard uses. Called after every partial injection so the share
+   view has clickable column-sort like the main app. #}
+<script src="{{ url_for('static', filename='js/sortable.js') }}"></script>
 <script>
   const SHARE_TOKEN   = "{{ token }}";
   const CURRENT_CODE  = "{{ current_code }}";
@@ -169,6 +176,15 @@
     document.querySelectorAll('.tab').forEach(t => {
       t.classList.toggle('active', t.dataset.report === kind);
     });
+
+    // Reflect the active tab in the share URL so an accountant refreshing
+    // the browser lands on the same tab they were viewing. Same rationale
+    // as the main dashboard's replaceState — see dashboard.js showReport.
+    try {
+      const u = new URL(window.location);
+      u.searchParams.set('report', kind);
+      history.replaceState({report: kind}, '', u.toString());
+    } catch (e) { /* older browsers — no-op */ }
 
     // Each report kind has its own route. /share/<token>/report/performance
     // is now first-class — the share route dispatches it through the P&L
@@ -200,6 +216,12 @@
         if (kind !== 'performance') {
           document.body.classList.remove('isolated-tab');
         }
+        // Every table in the freshly injected partial becomes sortable
+        // by clicking any column header (▼ desc, ▲ asc, arrow follows
+        // active column). Same behaviour as the main dashboard.
+        if (typeof makeAllTablesSortable === 'function') {
+          makeAllTablesSortable();
+        }
       })
       .catch(err => {
         console.error('share report load failed:', err);
@@ -210,10 +232,18 @@
       });
   }
 
-  // Auto-load the first allowed tab for the current account on page open.
+  // Auto-load a tab on page open. If the URL carries `?report=<kind>`
+  // (from a refresh — see the replaceState in showShareReport) AND
+  // that tab is actually present for the current account, open it.
+  // Otherwise fall back to the first allowed tab.
   document.addEventListener('DOMContentLoaded', () => {
-    const first = document.querySelector('.tab');
-    if (first) showShareReport(first.dataset.report);
+    const requested = new URLSearchParams(window.location.search).get('report');
+    let target = null;
+    if (requested) {
+      target = document.querySelector('.tab[data-report="' + requested + '"]');
+    }
+    if (!target) target = document.querySelector('.tab');
+    if (target) showShareReport(target.dataset.report);
   });
 </script>
 </body>

@@ -318,6 +318,9 @@
 </div>
 
 <script>const CURRENT_ACCOUNT = "{{ current_name }}";</script>
+{# sortable.js exposes makeAllTablesSortable(); dashboard.js calls it
+   after every partial inject + on initial paint. Load order matters. #}
+<script src="{{ url_for('static', filename='js/sortable.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

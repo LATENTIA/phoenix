@@ -478,7 +478,8 @@ def _render_per_trade_rows(tax_trades: pd.DataFrame) -> str:
         return ('<tr><td colspan="11" class="muted">'
                 'No trades closed in 2026 or later, nothing to tax.</td></tr>')
 
-    taxable = taxable.sort_values(["sell_date", "symbol"])
+    # Newest-first display order — matches TOB / P&L conventions.
+    taxable = taxable.sort_values(["sell_date", "symbol"], ascending=[False, True])
     rows = []
     for t in taxable.to_dict("records"):
         v = t.get("tax_realized_eur")

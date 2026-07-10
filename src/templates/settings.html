@@ -353,6 +353,14 @@
           <td class="actions">
             <div class="actions-inline">
               {% if not s.revoked %}
+                {# The full token is embedded as a data attribute on the
+                   Copy button so we can re-copy the URL without another
+                   server round-trip. The visible cell still shows only
+                   the 12-char prefix so screenshots / screen shares don't
+                   leak the credential. #}
+                <button data-token="{{ s.token }}"
+                        onclick="copyShareLinkFromRow(this)"
+                        title="Copy full share URL to clipboard">Copy</button>
                 {# Edit re-opens the create form pre-filled with this link's
                    current selections, so the operator can toggle accounts
                    or tabs on/off without recreating the link. The URL token
@@ -746,6 +754,19 @@
     navigator.clipboard.writeText(url).then(
       () => toast('URL copied', {type: 'success', duration: 1500}),
       () => toast('Copy failed, select and copy manually', {type: 'error', duration: 3000})
+    );
+  }
+  // Copy a share link's full URL from its table-row Copy button. The full
+  // token lives in a data-token attribute on the button — the visible cell
+  // still only shows the 12-char prefix so screen-share / screenshots
+  // don't leak the credential.
+  function copyShareLinkFromRow(btn) {
+    const token = btn.dataset.token;
+    if (!token) return;
+    const url = location.origin + '/share/' + token;
+    navigator.clipboard.writeText(url).then(
+      () => toast('Share URL copied', {type: 'success', duration: 1500}),
+      () => toast('Copy failed, try again', {type: 'error', duration: 3000})
     );
   }
   async function doShareRevoke(id) {

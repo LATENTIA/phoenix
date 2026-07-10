@@ -98,6 +98,11 @@
 
   applyRange(dateFrom.value, dateTo.value);
 
+  // Column-header sort is now handled by the shell's generic sortable-
+  // table utility (see dashboard.js → makeAllTablesSortable). That
+  // works for every table across every report, not just TOB. Removed
+  // the TOB-specific sort code that used to live here.
+
   // ---------- Filing view / Full detail toggle ----------
   //
   // Filing view hides verbose columns (description, price, USD proceeds,

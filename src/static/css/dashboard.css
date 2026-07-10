@@ -171,6 +171,27 @@ code,.mono,.num{font-family:var(--font-mono);font-feature-settings:"tnum","zero"
    standalone exports where there's no shell to provide that signal. */
 .report-shell > header .meta:last-of-type{display:none}
 
+/* Share-view hides bits that expose internal plumbing to accountants:
+     - Source column in the P&L "All transactions" table (file paths)
+     - "Data sources" <details> block below that table (same info)
+   The tags come from the partials (data-col="source" and .data-sources).
+   Main dashboard renders the same partial and keeps the columns visible
+   because <body> there does NOT have `.share-view`. */
+body.share-view [data-col="source"],
+body.share-view .data-sources{display:none !important}
+
+/* Sortable table headers.
+   dashboard.js walks every <table> in the viewer after each partial
+   inject and stamps `.sortable` on every non-checkbox <th>. Clicking
+   sorts by that column and appends a <span class="sort-arrow"> to the
+   header showing the current direction (▼ desc, ▲ asc). */
+#viewer table thead th.sortable{cursor:pointer;user-select:none;transition:color .12s}
+#viewer table thead th.sortable:hover{color:var(--phoenix)}
+#viewer table thead th.sortable .sort-arrow{
+  display:inline-block;margin-left:2px;font-size:.72rem;
+  color:var(--phoenix);letter-spacing:0
+}
+
 .app-footer{
   padding:10px 18px 18px;text-align:center;color:var(--text-faint);
   font-size:.78rem;letter-spacing:.02em

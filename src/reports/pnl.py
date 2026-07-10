@@ -689,9 +689,19 @@ def match_lots(
     closed_df = pd.DataFrame(closed)
     open_df = pd.DataFrame(open_rows)
     if not closed_df.empty:
-        closed_df = closed_df.sort_values(["close_year", "sell_date", "symbol"]).reset_index(drop=True)
+        # Display order: newest-first (year DESC, sell date DESC). Symbol
+        # ASC keeps ties readable (same-day sells grouped alphabetically).
+        closed_df = closed_df.sort_values(
+            ["close_year", "sell_date", "symbol"],
+            ascending=[False, False, True],
+        ).reset_index(drop=True)
     if not open_df.empty:
-        open_df = open_df.sort_values(["symbol", "buy_date"]).reset_index(drop=True)
+        # Newest purchase first — matches the "latest at top" convention
+        # across every other display table. Click-to-sort lets the user
+        # regroup by symbol later if they want.
+        open_df = open_df.sort_values(
+            ["buy_date", "symbol"], ascending=[False, True]
+        ).reset_index(drop=True)
     return closed_df, open_df
 
 
@@ -816,7 +826,7 @@ def annual_summary(closed: pd.DataFrame) -> pd.DataFrame:
             "losses_eur": losses_eur,
             "realized_pnl_eur": pnl_eur.sum(skipna=True),
         })
-    return pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("year", ascending=False).reset_index(drop=True)
 
 
 def _holdings_summary(open_df: pd.DataFrame, ibkr_positions: pd.DataFrame) -> pd.DataFrame:
@@ -940,7 +950,11 @@ def _fx_decomposition(closed: pd.DataFrame) -> pd.DataFrame:
         "price_eur": price_eur,
         "fx_eur": fx_eur,
     })
-    return out.groupby("close_year", as_index=False).sum().sort_values("close_year").reset_index(drop=True)
+    # FX decomposition table on the Performance tab. Newest year first
+    # to match every other display table across the app.
+    return out.groupby("close_year", as_index=False).sum().sort_values(
+        "close_year", ascending=False
+    ).reset_index(drop=True)
 
 
 _DIST_BINS: list[tuple[str, float | None, float | None]] = [
@@ -1176,9 +1190,10 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
         )
     annual_html = "\n".join(annual_rows_html)
 
-    # Closed trades — full detail
+    # Closed trades — full detail. Newest-first by default (see tob.py).
     closed_rows_html = []
-    cs = closed.sort_values(["sell_date", "symbol"]) if not closed.empty else closed
+    cs = (closed.sort_values(["sell_date", "symbol"], ascending=[False, True])
+          if not closed.empty else closed)
     for t in cs.to_dict("records"):
         v = t.get("realized_pnl_eur")
         cls = "pos" if (v or 0) >= 0 else "neg"
@@ -1223,7 +1238,14 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
     # All transactions (raw trade log)
     all_rows = []
     if not all_trades.empty:
-        at = all_trades.sort_values(["tradeDate", "symbol"], kind="stable")
+        # Newest-first — matches every other display table (see tob.py
+        # etc.). The click-to-sort util in sortable.js lets the viewer
+        # flip to oldest-first when auditing.
+        at = all_trades.sort_values(
+            ["tradeDate", "symbol"],
+            ascending=[False, True],
+            kind="stable",
+        )
         for t in at.to_dict("records"):
             qty = t.get("quantity") or 0
             side = "BUY" if qty > 0 else ("SELL" if qty < 0 else "")
@@ -1237,7 +1259,9 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
                 f"<td class='num'>{fmt_num(t.get('tradePrice'), 4)}</td>"
                 f"<td class='num'>{fmt_num(t.get('proceeds_usd'))}</td>"
                 f"<td class='num'>{fmt_num(t.get('commission_usd'))}</td>"
-                f"<td class='muted'>{html.escape(str(t.get('source','')))}</td>"
+                # data-col="source" lets the shell hide this cell in
+                # share view (accountants don't need internal file paths).
+                f"<td class='muted' data-col='source'>{html.escape(str(t.get('source','')))}</td>"
                 "</tr>"
             )
     all_trades_html = "\n".join(all_rows) or "<tr><td colspan='8' class='muted'>No trades.</td></tr>"

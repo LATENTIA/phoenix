@@ -88,7 +88,7 @@ def _compute_realized_by_year(closed: pd.DataFrame) -> pd.DataFrame:
             "losses_eur": float(pnl[pnl < 0].sum() or 0.0),    # negative
             "realized_net_eur": float(pnl.sum() or 0.0),
         })
-    return pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("year", ascending=False).reset_index(drop=True)
 
 
 def _compute_dividends_by_year(paired: pd.DataFrame) -> pd.DataFrame:
@@ -114,7 +114,7 @@ def _compute_dividends_by_year(paired: pd.DataFrame) -> pd.DataFrame:
             "gross_eur": float(sub["amount_eur"].sum() or 0.0),
             "wht_eur": float(sub["wht_amount_eur"].sum() or 0.0),
         })
-    return pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("year", ascending=False).reset_index(drop=True)
 
 
 def _merge_annual(realized: pd.DataFrame, divs: pd.DataFrame) -> pd.DataFrame:
@@ -137,7 +137,7 @@ def _merge_annual(realized: pd.DataFrame, divs: pd.DataFrame) -> pd.DataFrame:
         merged = realized.merge(divs, on="year", how="outer").fillna(0)
 
     merged["year"] = merged["year"].astype(int)
-    merged = merged.sort_values("year").reset_index(drop=True)
+    merged = merged.sort_values("year", ascending=False).reset_index(drop=True)
 
     # CIT base contribution from investment activity. WHT is creditable
     # (not deductible) so dividends enter at the GROSS amount.

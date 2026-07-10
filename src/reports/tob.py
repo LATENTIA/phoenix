@@ -320,7 +320,10 @@ def render_html(trades_df: pd.DataFrame, meta: dict, as_partial: bool = False) -
         if col in display_df.columns:
             display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
     if 'TradeDate' in display_df.columns:
-        display_df = display_df.sort_values('TradeDate', kind='stable').reset_index(drop=True)
+        # Newest-first by default — the user is usually reviewing recent
+        # activity. tob.js exposes a header-click toggle to flip to oldest-
+        # first when needed (e.g. audit trail from the beginning).
+        display_df = display_df.sort_values('TradeDate', ascending=False, kind='stable').reset_index(drop=True)
 
     rows_html = _build_table_rows(display_df)
 
