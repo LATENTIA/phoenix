@@ -9,10 +9,18 @@
   }
   buttons.forEach(btn => btn.addEventListener('click', () => activate(btn.dataset.target)));
 
-  // Allow external nav via ?tab=holdings|performance|open|closed|all
-  // When set, enter "isolated" mode (hides everything except the requested panel).
-  const params = new URLSearchParams(window.location.search);
-  const requested = params.get('tab');
+  // Allow external nav to a specific sub-tab. The old design read this
+  // from `window.location.search` (worked only when the partial ran in
+  // its own iframe — the iframe URL carried `?tab=performance`). After
+  // the Phase 2 iframe removal, the browser URL is the dashboard's, not
+  // the partial fetch URL, so the query string trick stops working.
+  //
+  // We now read `data-initial-tab` off the closest `.report-shell` wrap
+  // instead. The Python builder sets this attribute when called via
+  // /report/performance/<account>?partial=1 — same activation result,
+  // no dependency on the browser URL.
+  const shell = document.querySelector('.report-shell[data-report="pnl"]');
+  const requested = shell ? (shell.dataset.initialTab || '') : '';
   if (requested) {
     const targetId = 'tab-' + requested;
     if (document.getElementById(targetId)) {
@@ -21,17 +29,7 @@
     }
   }
 
-  // Privacy toggle
-  const privacyBtn = document.getElementById('privacy-toggle');
-  function applyPrivacy(on) {
-    document.body.classList.toggle('privacy', on);
-    privacyBtn.textContent = on ? '🙈' : '👁';
-    privacyBtn.title = on ? 'Show values' : 'Hide values';
-  }
-  privacyBtn.addEventListener('click', () => {
-    const on = !document.body.classList.contains('privacy');
-    localStorage.setItem('ibkr_privacy', on ? '1' : '0');
-    applyPrivacy(on);
-  });
-  applyPrivacy(localStorage.getItem('ibkr_privacy') === '1');
+  // Privacy toggle owned by the dashboard shell (Phase 2C). See tob.js
+  // for the rationale; same applies here — this IIFE re-runs on every
+  // tab switch so it must not re-bind shell-level handlers.
 })();

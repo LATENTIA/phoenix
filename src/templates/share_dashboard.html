@@ -2,26 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>Phoenix (view-only) — {{ account_name|capitalize }}</title>
+  <title>Phoenix (view-only) — {{ accounts[current_code].name|capitalize }}</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+  {# Report stylesheets — needed because the share dashboard now injects
+     report partials inline (Phase 3a #4) instead of loading them in an
+     iframe. Same set the main dashboard links. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tob.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pnl.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/cgt.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dividends.css') }}"/>
   <style>
-    /* View-only banner. Mirrors the .env-pill colour scheme so it reads as a
-       status pill rather than a warning. */
+    /* Share dashboard keeps its own legacy layout (single column: header
+       + tab strip + iframe viewer). Phase 1's dashboard.css overwrote the
+       .container/.topbar/.env-switch/.tabs/.tab rules that the share view
+       used, so we re-declare them here scoped to this template only. */
+
+    .container{max-width:1400px;margin:0 auto;padding:20px 24px 32px}
+
+    .topbar{display:flex;align-items:center;justify-content:space-between;
+            flex-wrap:wrap;gap:16px;margin-bottom:16px;background:transparent;
+            border-bottom:0;padding:0}
+    .title{display:flex;align-items:center;gap:10px}
+    .title .brand-mark{display:block;flex-shrink:0}
+    .title h1{margin:0;font-size:1.2rem;font-weight:500;font-family:var(--font-heading)}
+    .title .env-pill{background:var(--accent-color, var(--phoenix));
+                     color:#0a0908;padding:4px 12px;border-radius:999px;
+                     font-size:.75rem;font-weight:600;letter-spacing:.05em;
+                     text-transform:uppercase}
+
+    .env-switch{display:flex;background:var(--surface);border:1px solid var(--border);
+                border-radius:999px;padding:3px;gap:2px}
+    .env-switch .pill-wrap{position:relative;display:inline-flex;align-items:center}
+    .env-switch a.pill{padding:6px 14px;border-radius:999px;color:var(--text-muted);
+                       text-decoration:none;font-size:.85rem;font-weight:500;
+                       transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+    .env-switch a.pill:hover{color:var(--text)}
+    .env-switch a.pill .dot{width:8px;height:8px;border-radius:50%;
+                            background:var(--pill-color, var(--text-faint));flex-shrink:0}
+    .env-switch a.pill.active{background:var(--pill-color, var(--accent-color));
+                              color:#0a0908;font-weight:600}
+    .env-switch a.pill.active .dot{background:#0a0908;opacity:.6}
+
+    .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);flex-wrap:wrap;
+          margin:14px 0 0}
+    .tab{background:transparent;border:0;color:var(--text-muted);padding:10px 18px;
+         font:inherit;font-size:.9rem;cursor:pointer;border-bottom:2px solid transparent;
+         margin-bottom:-1px;transition:color .15s,border-color .15s}
+    .tab:hover{color:var(--text)}
+    .tab.active{color:var(--accent-color, var(--phoenix));
+                border-bottom-color:var(--accent-color, var(--phoenix))}
+
+    .viewer{background:var(--surface);border:1px solid var(--border);
+            border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);
+            min-height:75vh;
+            /* Partials inject directly into this container now. Phase 3a
+               #4 dropped the iframe, so the old `overflow:hidden` (which
+               clipped the iframe's edges) would now clip real content. */
+            overflow:auto;position:relative;
+            padding:16px 18px}
+    .viewer .placeholder{padding:60px 24px;text-align:center;color:var(--text-muted)}
+
+    /* View-only banner. Uses the phoenix-glow token so the banner colour
+       tracks whichever account the viewer is currently looking at. */
     .viewonly-banner {
-      background: rgba(56,189,248,.08);
-      border: 1px solid var(--accent);
-      border-left: 4px solid var(--accent);
-      border-radius: 8px;
+      background: var(--phoenix-glow);
+      border: 1px solid var(--accent-color, var(--phoenix));
+      border-left: 4px solid var(--accent-color, var(--phoenix));
+      border-radius: var(--radius-sm);
       padding: 10px 14px;
       margin: 14px 0;
       font-size: .9rem;
-      color: #bae6fd;
+      color: var(--text);
     }
-    .viewonly-banner strong { color: #fff }
+    .viewonly-banner strong { color: var(--text) }
   </style>
 </head>
-<body style="--accent-color: var(--{{ account_type }})">
+{# Accent colour follows the CURRENTLY-selected account's type, so switching
+   pills also recolours the chrome (matches the main dashboard's behaviour). #}
+<body style="--accent-color: var(--{{ accounts[current_code].type }})">
 
 <div class="container">
   <div class="topbar">
@@ -29,20 +91,34 @@
       <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="brand-mark"
            width="36" height="46"/>
       <h1>Phoenix</h1>
-      <span class="env-pill">{{ account_name }}</span>
+      <span class="env-pill">{{ accounts[current_code].name }}</span>
     </div>
     <div class="env-switch">
-      <span class="muted" style="padding:6px 12px;font-size:.85rem">
-        view-only access
-      </span>
+      {# One pill per shared account. Clicking reloads the share dashboard
+         with ?account=<code> so the per-account tab list is recomputed
+         server-side. Same pattern as the main dashboard's /?account=<name>. #}
+      {% for code, info in accounts.items() %}
+        <span class="pill-wrap" style="--pill-color: var(--{{ info.type }})">
+          <a href="/share/{{ token }}?account={{ code }}"
+             class="pill {{ 'active' if code == current_code else '' }}"
+             title="{{ info.type }} account">
+            <span class="dot"></span>{{ info.name|capitalize }}
+          </a>
+        </span>
+      {% endfor %}
+      <span class="muted" style="padding:6px 12px;font-size:.85rem">view-only</span>
     </div>
   </div>
 
   <div class="viewonly-banner">
     <strong>👁 View-only share link.</strong>
-    You are viewing the <strong>{{ account_name }}</strong> account. No
-    edits, no downloads from IBKR. Access can be revoked at any time by the
-    account owner.
+    You are viewing the <strong>{{ accounts[current_code].name }}</strong> account.
+    {% if accounts|length > 1 %}
+      Use the pills above to switch to the other {{ accounts|length - 1 }} shared
+      account{% if accounts|length > 2 %}s{% endif %}.
+    {% endif %}
+    No edits, no downloads from IBKR. Access can be revoked at any time by
+    the account owner.
     {% if label %}<br/><span class="muted">Link label: {{ label }}</span>{% endif %}
     {% if expires_at %}<br/><span class="muted">Expires: {{ expires_at }}</span>{% endif %}
   </div>
@@ -53,10 +129,11 @@
       'pnl': 'P&L',
       'performance': 'Performance',
       'cgt': 'CGT 2026+',
+      'corporate_tax': 'Corporate Tax',
       'dividends': 'Dividends',
       'methodology': 'Methodology'
     } %}
-    {% for t in allowed_tabs %}
+    {% for t in accounts[current_code].tabs %}
       <button class="tab {% if loop.first %}active{% endif %}"
               data-report="{{ t }}"
               onclick="showShareReport('{{ t }}')">{{ tab_labels.get(t, t) }}</button>
@@ -77,35 +154,63 @@
 </div>
 
 <script>
-  const SHARE_TOKEN = "{{ token }}";
+  const SHARE_TOKEN   = "{{ token }}";
+  const CURRENT_CODE  = "{{ current_code }}";
+  const viewer = document.getElementById('viewer');
 
+  // Phase 3a #4: the share dashboard used to embed each report in an
+  // iframe with ?embed=1 to strip the report's own header. That meant a
+  // full document fetch + parse + CSS apply on every tab click — slow,
+  // and visually a "second app". We now fetch the same ?partial=1
+  // fragment the main dashboard uses and inject it directly, then
+  // re-execute the embedded <script> tag so per-report JS (filters,
+  // sub-tabs, view-toggles) re-binds against the fresh DOM.
   function showShareReport(kind) {
-    // Highlight the active tab.
     document.querySelectorAll('.tab').forEach(t => {
       t.classList.toggle('active', t.dataset.report === kind);
     });
-    // Render the report in an iframe so its <style>/<script> are isolated
-    // from the share dashboard's chrome (mirrors the main dashboard).
-    //
-    // Two special cases mirror the main dashboard's showReport():
-    //  - 'performance' is the P&L report with ?tab=performance, so the
-    //    P&L template's internal JS opens the Performance subtab.
-    //  - We append a timestamp so the iframe is a fresh fetch (no cache).
-    const viewer = document.getElementById('viewer');
-    const ts = Date.now();
-    let url;
-    if (kind === 'performance') {
-      url = `/share/${SHARE_TOKEN}/report/pnl?t=${ts}&tab=performance`;
-    } else {
-      url = `/share/${SHARE_TOKEN}/report/${kind}?t=${ts}`;
-    }
-    viewer.innerHTML =
-      `<iframe src="${url}" `
-      + `style="width:100%;height:calc(100vh - 220px);border:0;background:#fff" `
-      + `loading="lazy"></iframe>`;
+
+    // Each report kind has its own route. /share/<token>/report/performance
+    // is now first-class — the share route dispatches it through the P&L
+    // builder with sub_tab="performance", same as the main /report route.
+    const url = `/share/${SHARE_TOKEN}/report/${kind}?account=${encodeURIComponent(CURRENT_CODE)}`
+              + `&partial=1`;
+
+    viewer.innerHTML = '<div class="placeholder">Loading…</div>';
+
+    fetch(url, {credentials: 'same-origin'})
+      .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(html => {
+        viewer.innerHTML = html;
+        // Re-execute inline <script> tags (innerHTML doesn't run them).
+        viewer.querySelectorAll('script').forEach(orig => {
+          const fresh = document.createElement('script');
+          for (const a of orig.attributes) fresh.setAttribute(a.name, a.value);
+          fresh.textContent = orig.textContent;
+          orig.replaceWith(fresh);
+        });
+        // Performance activation is server-side now (see dashboard.js
+        // and pnl.js for the full story). The /share/<token>/report/
+        // performance route renders the partial with data-initial-tab
+        // baked in, so pnl.js activates the panel itself. We just
+        // need to CLEAR body.isolated-tab when switching away.
+        if (kind !== 'performance') {
+          document.body.classList.remove('isolated-tab');
+        }
+      })
+      .catch(err => {
+        console.error('share report load failed:', err);
+        viewer.innerHTML =
+          '<div class="placeholder" style="color:var(--loss)">' +
+          'Failed to load report: ' + (err && err.message ? err.message : err) +
+          '</div>';
+      });
   }
 
-  // Auto-load the first allowed tab.
+  // Auto-load the first allowed tab for the current account on page open.
   document.addEventListener('DOMContentLoaded', () => {
     const first = document.querySelector('.tab');
     if (first) showShareReport(first.dataset.report);

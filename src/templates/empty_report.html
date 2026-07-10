@@ -1,21 +1,37 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>No data — {{ kind }}</title>
-<style>
-  body{margin:0;background:#0f172a;color:#94a3b8;font-family:-apple-system,sans-serif;
-       display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}
-  .box{padding:48px;border:1px dashed #334155;border-radius:12px;max-width:520px}
-  .box h1{color:#e2e8f0;font-size:1.2rem;margin:0 0 8px}
-  .box code{background:#273449;padding:2px 6px;border-radius:4px;color:#e2e8f0}
-</style>
-</head>
-<body>
-<div class="box">
-  <h1>No {{ kind }} data for {{ account }}</h1>
-  <p>The database has no trades for this account yet.<br>
-  Click <code>⚡ Load data</code> in the dashboard to download and ingest.</p>
+{# Empty-state placeholder rendered when a report builder is called for an
+   account that has no ingested data yet. Served as a body fragment (no
+   <html>/<head>/<body>) because it's almost always inlined into the
+   dashboard shell's #viewer — same convention as the report partials.
+   Uses tokens.css custom properties so it inherits the night-ledger
+   palette wherever it's embedded. #}
+<div class="report-shell empty-state" data-report="empty">
+  <style>
+    .empty-state{
+      display:flex;align-items:center;justify-content:center;
+      min-height:50vh;padding:48px 24px;text-align:center;
+      color:var(--text-muted);
+    }
+    .empty-state .box{
+      max-width:520px;padding:36px 32px;
+      border:1px dashed var(--border);border-radius:var(--radius-sm);
+      background:var(--surface);
+    }
+    .empty-state h1{
+      font-family:var(--font-heading);font-size:1.2rem;font-weight:500;
+      color:var(--text);margin:0 0 10px
+    }
+    .empty-state p{margin:0 0 4px;line-height:1.55}
+    .empty-state code{
+      background:var(--surface-2);padding:2px 6px;
+      border-radius:var(--radius-sm);color:var(--text);
+      font-family:var(--font-mono);font-size:.88rem
+    }
+  </style>
+  <div class="box">
+    <h1>No {{ kind }} data for {{ account }}</h1>
+    <p>This account has no ingested trades yet.</p>
+    <p>Use <code>Sync from IBKR</code> in the sidebar to download and
+    import the Flex statement, or <code>Add trade</code> to enter trades
+    manually.</p>
+  </div>
 </div>
-</body>
-</html>

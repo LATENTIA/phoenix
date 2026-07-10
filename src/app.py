@@ -91,6 +91,38 @@ def _warn_if_unmigrated_install() -> None:
     log.warning("Then restart docker compose.")
     log.warning("=" * 70)
 
+
+def _warn_if_auth_disabled_and_exposed() -> None:
+    """Loud warning when Basic Auth is OFF on a non-localhost bind. Both
+    conditions together mean every route, including destructive ones like
+    POST /db/reset and DELETE /accounts/<id>, is fully open to anyone who
+    can reach the port.
+
+    Triggers at LOG.ERROR level so it stands out in stdout, even when
+    log files are noisy."""
+    auth_user = os.environ.get("PHOENIX_AUTH_USER")
+    auth_hash = os.environ.get("PHOENIX_AUTH_PASS_HASH")
+    if auth_user and auth_hash:
+        return        # auth is configured, nothing to warn about
+
+    bind_host = os.environ.get("PHOENIX_BIND_HOST", "127.0.0.1")
+    # 127.0.0.1 (loopback) is the only host where running without auth is
+    # genuinely safe for a single-user dev box. ::1 (IPv6 loopback) too.
+    if bind_host in ("127.0.0.1", "localhost", "::1"):
+        log.info("auth: PHOENIX_AUTH_USER / PHOENIX_AUTH_PASS_HASH not set; "
+                 "running without Basic Auth on loopback bind. Fine for local dev.")
+        return
+
+    log.error("=" * 70)
+    log.error("SECURITY: Phoenix is binding to %s WITHOUT Basic Auth.", bind_host)
+    log.error("PHOENIX_AUTH_USER / PHOENIX_AUTH_PASS_HASH are unset, so every")
+    log.error("route, INCLUDING destructive ones (db reset, account delete,")
+    log.error("share-link create), is open to anyone who can reach the port.")
+    log.error("Set both env vars before exposing Phoenix to anything beyond")
+    log.error("localhost. See .env.runtime.example for the password-hash recipe.")
+    log.error("=" * 70)
+
+
 # ---------- Logging ----------
 # Create LOG_DIR before configuring the FileHandler. The rest of the
 # writable dirs are created later by _ensure_data_dirs() once logging is up.
@@ -221,18 +253,46 @@ def _require_basic_auth():
     )
 
 
+import re as _re
+
+# Share-link URLs carry the bearer token in the path:
+#   /share/<token>                    -> dashboard
+#   /share/<token>/report/<kind>      -> report iframe
+# Anyone with log access could harvest these tokens and use them against the
+# live app until the link is revoked, so we redact the token segment before
+# anything reaches the log handlers. The redaction also covers Caddy access
+# logs because Caddy formats `{uri}` from the request path AFTER WSGI sees it
+# — but Caddy's log format is its own concern (see Caddyfile). Here we just
+# protect Phoenix's own logger.
+_SHARE_TOKEN_PATH_RE = _re.compile(r"^(/share)/([^/?#]+)(.*)$")
+
+def _safe_path(path: str) -> str:
+    """Return a log-safe version of a URL path. Currently redacts the token
+    segment in /share/<token>... URLs. Leaves every other path untouched."""
+    m = _SHARE_TOKEN_PATH_RE.match(path or "")
+    if not m:
+        return path
+    # Keep a short prefix of the token so the same link can be tracked across
+    # log lines (helpful when debugging a misbehaving accountant). 8 chars of
+    # token_urlsafe(32) is still ~48 bits, an attacker can't brute-force it.
+    token = m.group(2)
+    prefix = token[:8]
+    return f"{m.group(1)}/{prefix}…REDACTED{m.group(3)}"
+
+
 @app.before_request
 def _log_request():
     # Path + method only. Query strings are NOT logged — if a future endpoint
     # ever accepts a sensitive value via GET, it must not silently end up in
-    # logs/app.log or CloudWatch.
-    log.info(f"REQ {request.method} {request.path}")
+    # logs/app.log or CloudWatch. Share tokens are redacted via _safe_path
+    # because the path itself IS the credential for /share/<token>/...
+    log.info(f"REQ {request.method} {_safe_path(request.path)}")
 
 
 @app.errorhandler(CSRFError)
 def _handle_csrf_error(e):
     """Don't leak the framework's default CSRF traceback to the browser."""
-    log.warning(f"CSRF rejected: {e.description} on {request.method} {request.path}")
+    log.warning(f"CSRF rejected: {e.description} on {request.method} {_safe_path(request.path)}")
     return Response(
         "CSRF token missing or invalid. Refresh the page and try again.",
         status=400, mimetype="text/plain",
@@ -320,6 +380,7 @@ def _start_fx_scheduler() -> None:
 def _bootstrap_db():
     _ensure_data_dirs()
     _warn_if_unmigrated_install()
+    _warn_if_auth_disabled_and_exposed()
     conn = db.connect()
     db.init_schema(conn)
     conn.close()
@@ -350,6 +411,31 @@ def index():
     db.init_schema(conn)
     db_stat = db.status(conn)
     conn.close()
+
+    # Phase 2: render the active report's partial server-side so the very
+    # first page paint shows real content (no flash-of-empty-viewer between
+    # page load and the JS fetch). `?report=<kind>` lets a deep-link land
+    # on a specific tab; defaults to TOB. The tab list in dashboard.html
+    # gates which kinds are valid per account type, so we also gate here.
+    initial_kind = (request.args.get("report") or "tob").lower()
+    valid_kinds_for_type = {
+        "personal": {"tob", "pnl", "performance", "cgt", "dividends", "methodology"},
+        "business": {"tob", "pnl", "performance", "corporate_tax", "dividends", "methodology"},
+    }
+    if initial_kind not in valid_kinds_for_type.get(current_type, set()):
+        initial_kind = "tob"
+
+    initial_report_html = ""
+    if statuses.get(requested, {}).get("has_data"):
+        try:
+            initial_report_html = _render_partial(initial_kind, current_code)
+        except Exception as e:
+            # Don't let a broken report crash the dashboard. Log + fall back
+            # to the empty placeholder so the rest of the UI still renders.
+            log.warning(f"index: initial partial render failed kind={initial_kind} "
+                        f"account={current_code}: {e}")
+            initial_report_html = ""
+
     return render_template(
         "dashboard.html",
         accounts=accounts_simple,
@@ -359,7 +445,41 @@ def index():
         current_name=requested,
         current_code=current_code,
         db_status=db_stat,
+        initial_kind=initial_kind,
+        initial_report_html=initial_report_html,
     )
+
+
+def _render_partial(kind: str, code: str) -> str:
+    """Render `kind` as a body fragment (no <html>/<head>/<body>). Used by
+    the dashboard's first paint so the user doesn't see a blank #viewer
+    before the JS-driven fetch completes. Mirrors the dispatch in the
+    /report route; keep them in sync."""
+    if kind == "tob":
+        from reports import tob as _tob
+        return _tob.build_tob_html(code, as_partial=True)
+    if kind == "pnl":
+        from reports import pnl as _pnl
+        return _pnl.build_pnl_html(code, as_partial=True)
+    if kind == "performance":
+        # See the /report route's docstring for "performance" — same idea.
+        # The P&L builder renders the partial with sub_tab="performance"
+        # baked in so the panel switches at parse time, no JS workaround.
+        from reports import pnl as _pnl
+        return _pnl.build_pnl_html(code, as_partial=True, sub_tab="performance")
+    if kind == "cgt":
+        from reports import cgt as _cgt
+        return _cgt.build_cgt_html(code, as_partial=True)
+    if kind == "corporate_tax":
+        from reports import corporate_tax as _ct
+        return _ct.build_corporate_tax_html(code, as_partial=True)
+    if kind == "dividends":
+        from reports import dividends as _div
+        return _div.build_dividends_html(code, as_partial=True)
+    if kind == "methodology":
+        from reports import methodology as _meth
+        return _meth.build_methodology_html(code, as_partial=True)
+    return ""
 
 
 @app.route("/run/<action>/<code>", methods=["POST"])
@@ -725,15 +845,33 @@ def accounts_add():
 
 @app.route("/accounts/<int:account_id>", methods=["DELETE"])
 def accounts_delete(account_id: int):
+    """Delete an account and all of its data. Requires a confirmation token
+    in the JSON body matching the account's exact name. The settings.html
+    UI already enforces this in the browser ("type the name to confirm");
+    we re-check server-side so a scripted caller with credentials still
+    has to know the target account's name."""
     conn = db.connect()
     db.init_schema(conn)
-    # Pull the stored token reference BEFORE deleting the row, so AWS-mode
-    # can clean up the corresponding Secrets Manager entry. Plaintext mode
-    # treats this as a no-op.
+    # Look up the account first so we can validate the confirm token without
+    # leaking whether the row exists (we 404 either way on mismatch).
     row = conn.execute(
-        "SELECT flex_token FROM accounts WHERE id = ?", (account_id,)
+        "SELECT name, flex_token FROM accounts WHERE id = ?", (account_id,)
     ).fetchone()
-    stored_token = row["flex_token"] if row else None
+    if row is None:
+        conn.close()
+        return jsonify({"ok": False, "error": "account not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    supplied = (data.get("confirm") or "").strip()
+    if supplied != row["name"]:
+        conn.close()
+        log.warning(f"accounts/delete: confirm-token mismatch for id={account_id}")
+        return jsonify({
+            "ok": False,
+            "error": "confirm token must equal the account name",
+        }), 400
+
+    stored_token = row["flex_token"]
     result = db.delete_account(conn, account_id)
     conn.close()
     if stored_token:
@@ -751,9 +889,25 @@ def accounts_delete(account_id: int):
     })
 
 
+# Confirm token expected for POST /db/reset. Keep in sync with settings.html
+# (the "type DELETE" UX). Constant rather than magic-string so a future name
+# change touches one place.
+DB_RESET_CONFIRM_TOKEN = "DELETE"
+
+
 @app.route("/db/reset", methods=["POST"])
 def db_reset():
-    """Wipe every data table. Destructive — caller must already have confirmed."""
+    """Wipe every data table. Requires `{"confirm": "DELETE"}` in the body.
+    The settings.html UI enforces this in the browser; the server check
+    guards against scripted callers that bypass the typed confirmation."""
+    data = request.get_json(silent=True) or {}
+    supplied = (data.get("confirm") or "").strip()
+    if supplied != DB_RESET_CONFIRM_TOKEN:
+        log.warning("db: RESET refused — confirm token missing/incorrect")
+        return jsonify({
+            "ok": False,
+            "error": f"confirm token must equal {DB_RESET_CONFIRM_TOKEN!r}",
+        }), 400
     log.warning("db: RESET requested — wiping all tables")
     conn = db.connect()
     db.init_schema(conn)
@@ -761,6 +915,38 @@ def db_reset():
     conn.close()
     log.warning(f"db: reset complete, deleted {counts}")
     return jsonify({"deleted": counts, "ok": True})
+
+
+def _maybe_apply_embed_mode(html: str) -> str:
+    """When the request URL has `?embed=1` (set by the dashboard's iframe
+    loader), inject CSS that suppresses the report's own duplicate chrome:
+
+      - The report's <header> block (H1 + generation timestamps) is hidden
+        because the dashboard's topbar already shows the account name.
+      - Container top padding tightens since the header is gone.
+
+    Implementing this as a post-render CSS injection means we don't have to
+    thread an `embed` kwarg through every report builder (tob, pnl, cgt,
+    dividends, methodology, corporate_tax). The replace is anchored to the
+    first </head> so it cannot accidentally hit a </head> string inside the
+    report body.
+
+    The privacy toggle (👁) is INTENTIONALLY left visible: the dashboard
+    chrome does not have its own toggle, so suppressing it inside the
+    iframe would remove the only screen-share blur control."""
+    try:
+        if request.args.get("embed") != "1":
+            return html
+    except RuntimeError:
+        # Called outside a request context (e.g. CLI use of build_*_html).
+        return html
+    inject = (
+        "<style id='phoenix-embed-overrides'>"
+        "body > .container > header { display: none !important }"
+        "body > .container { padding-top: 8px !important }"
+        "</style>"
+    )
+    return html.replace("</head>", inject + "</head>", 1)
 
 
 @app.route("/report/<kind>/<account>")
@@ -775,23 +961,53 @@ def report(kind: str, account: str):
         abort(404)
     code = name_to_code[account]
 
+    # Tax-tab gating: CGT 2026+ is the individual regime (basis reset,
+    # EUR 10k cap); Corporate Tax is the 25% flat CIT. Showing the wrong
+    # one for the account type would produce a meaningless number.
+    acc_type = (accs.get(code) or {}).get("type", "personal")
+    if kind == "cgt" and acc_type != "personal":
+        log.warning(f"report: cgt requested for non-personal account {account!r} (type={acc_type})")
+        abort(404)
+    if kind == "corporate_tax" and acc_type != "business":
+        log.warning(f"report: corporate_tax requested for non-business account {account!r} (type={acc_type})")
+        abort(404)
+
+    # `?partial=1` is the Phase 2 path: return ONLY the report body fragment
+    # (no <html>/<head>/<body>) so the dashboard shell can fetch it and inject
+    # it directly into the page. Default (no flag) keeps returning a full
+    # self-contained document — used by the CLI exporter and any legacy
+    # iframe loaders we haven't migrated yet.
+    as_partial = request.args.get("partial") == "1"
+
     start = datetime.now()
     try:
         if kind == "tob":
             from reports import tob as _tob
-            html = _tob.build_tob_html(code)
+            html = _tob.build_tob_html(code, as_partial=as_partial)
         elif kind == "pnl":
             from reports import pnl as _pnl
-            html = _pnl.build_pnl_html(code)
+            html = _pnl.build_pnl_html(code, as_partial=as_partial)
+        elif kind == "performance":
+            # Performance is the P&L partial with the Performance sub-tab
+            # pre-activated. Used to route through the P&L builder with
+            # ?tab=performance, which only worked when the report ran in
+            # its own iframe (window.location.search carried the param).
+            # In partial mode we tell the builder to render with the
+            # sub-tab baked in so the route works as a direct URL too.
+            from reports import pnl as _pnl
+            html = _pnl.build_pnl_html(code, as_partial=as_partial, sub_tab="performance")
         elif kind == "cgt":
             from reports import cgt as _cgt
-            html = _cgt.build_cgt_html(code)
+            html = _cgt.build_cgt_html(code, as_partial=as_partial)
         elif kind == "dividends":
             from reports import dividends as _div
-            html = _div.build_dividends_html(code)
+            html = _div.build_dividends_html(code, as_partial=as_partial)
+        elif kind == "corporate_tax":
+            from reports import corporate_tax as _ct
+            html = _ct.build_corporate_tax_html(code, as_partial=as_partial)
         elif kind == "methodology":
             from reports import methodology as _meth
-            html = _meth.build_methodology_html(code)
+            html = _meth.build_methodology_html(code, as_partial=as_partial)
         else:
             log.warning(f"report: unknown kind {kind!r}")
             abort(404, f"Unknown report kind: {kind}")
@@ -799,8 +1015,13 @@ def report(kind: str, account: str):
         log.error(f"report: FAILED kind={kind} account={account}: {e}")
         log.error(traceback.format_exc())
         raise
-    log.info(f"report: rendered kind={kind} account={account} bytes={len(html)} in {(datetime.now()-start).total_seconds():.2f}s")
-    return Response(html, mimetype="text/html; charset=utf-8")
+    log.info(f"report: rendered kind={kind} account={account} "
+             f"bytes={len(html)} partial={as_partial} "
+             f"in {(datetime.now()-start).total_seconds():.2f}s")
+    # Embed-mode CSS injection only applies to FULL documents (it patches
+    # the <head>). Partials have no <head>, so skip the helper entirely.
+    body = html if as_partial else _maybe_apply_embed_mode(html)
+    return Response(body, mimetype="text/html; charset=utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -855,10 +1076,14 @@ def settings_page():
     db.init_schema(conn)
     share_links = db.list_share_links(conn).to_dict("records")
     conn.close()
-    # Enrich each share link with the human-readable account name for display.
+    # Enrich each share link with human-readable account names for display.
+    # `accounts` is a dict {code: [tabs...]}; we add a parallel display dict
+    # mapping each code to the account's display name.
     code_to_name = {code: a["name"] for code, a in accs.items()}
     for s in share_links:
-        s["account_name"] = code_to_name.get(s["account_code"], s["account_code"])
+        accounts = s.get("accounts") or {}
+        s["accounts"] = accounts
+        s["account_names"] = {code: code_to_name.get(code, code) for code in accounts}
     return render_template(
         "settings.html",
         accounts_full=accs,
@@ -875,7 +1100,12 @@ def settings_page():
 # Reports the dashboard knows how to render (must match the keys used by the
 # main dashboard's showReport() in dashboard.js). Used to validate the tab
 # list when creating a share link.
-KNOWN_REPORT_KINDS = ("tob", "pnl", "performance", "cgt", "dividends", "methodology")
+KNOWN_REPORT_KINDS = (
+    "tob", "pnl", "performance",       # both account types
+    "cgt",                              # personal only (Belgian individual CGT 2026+)
+    "corporate_tax",                    # business only (Belgian CIT 25%)
+    "dividends", "methodology",         # both account types
+)
 
 
 def _share_or_404(token: str):
@@ -897,27 +1127,59 @@ def _share_or_404(token: str):
 @app.route("/share/<token>")
 @limiter.limit("60 per minute")
 def share_dashboard(token: str):
-    """View-only dashboard scoped to one account and a fixed set of tabs.
-    The token IS the credential — no basic-auth prompt, no edit operations,
-    no account switcher. Iframe sub-requests go to /share/<token>/report/<k>."""
+    """View-only dashboard scoped to one or more accounts, each with its own
+    allowed tab list. The token IS the credential, no basic-auth prompt,
+    no edit operations, no full account switcher (only the picked accounts
+    are shown as switcher pills). Iframe sub-requests go to
+    /share/<token>/report/<kind>?account=<code>."""
     share = _share_or_404(token)
 
     accs = account_service.get_accounts()
     code_to_name = {code: a["name"] for code, a in accs.items()}
-    account_name = code_to_name.get(share["account_code"], share["account_code"])
-    account_type = (accs.get(share["account_code"]) or {}).get("type", "personal")
+    code_to_type = {code: a.get("type", "personal") for code, a in accs.items()}
 
-    allowed_tabs = [t for t in share["allowed_tabs"].split(",") if t]
-    # Filter to the tabs Phoenix actually knows how to render. Defends
-    # against stale data if the report set ever shrinks.
-    allowed_tabs = [t for t in allowed_tabs if t in KNOWN_REPORT_KINDS]
+    # Build the dict the template iterates over. Skip any account code that
+    # no longer exists (defends against a stale link whose account was
+    # deleted) and any tab that isn't currently renderable.
+    shared_accounts: dict[str, dict] = {}
+    for code, tabs in (share.get("accounts") or {}).items():
+        if code not in accs:
+            continue
+        acc_type = code_to_type[code]
+        # Drop tabs that don't fit this account's type (CGT for business,
+        # corporate_tax for personal, etc.). Defensive against stale links.
+        clean_tabs = []
+        for t in tabs:
+            if t not in KNOWN_REPORT_KINDS:
+                continue
+            if t == "cgt" and acc_type != "personal":
+                continue
+            if t == "corporate_tax" and acc_type != "business":
+                continue
+            clean_tabs.append(t)
+        if not clean_tabs:
+            continue
+        shared_accounts[code] = {
+            "name": code_to_name[code],
+            "type": acc_type,
+            "tabs": clean_tabs,
+        }
+    if not shared_accounts:
+        abort(404)
+
+    # Pick which account to render first. Query string ?account=<code>
+    # overrides; otherwise use the first (deterministic) entry.
+    requested = (request.args.get("account") or "").strip()
+    if requested in shared_accounts:
+        current_code = requested
+    else:
+        current_code = next(iter(shared_accounts))
 
     return render_template(
         "share_dashboard.html",
         token=token,
-        account_name=account_name,
-        account_type=account_type,
-        allowed_tabs=allowed_tabs,
+        accounts=shared_accounts,
+        current_code=current_code,
         label=share.get("label") or "",
         expires_at=share.get("expires_at"),
         created_at=share.get("created_at"),
@@ -928,12 +1190,18 @@ def share_dashboard(token: str):
 @limiter.limit("60 per minute")
 def share_report(token: str, kind: str):
     """Render the report inside the share dashboard's iframe. Validates the
-    token, checks the requested kind is in the share's allowed_tabs, then
-    renders that report for the share's account_code. 404 on any failure —
-    don't reveal whether the issue was the token, the tab, or the account."""
+    token, identifies the account from `?account=<code>` (must be in the
+    share's accounts), checks the requested kind is allowed for that
+    account, then renders. 404 on any failure: don't reveal whether the
+    issue was the token, the tab, or the account."""
     share = _share_or_404(token)
 
-    allowed = set(t for t in share["allowed_tabs"].split(",") if t)
+    code = (request.args.get("account") or "").strip()
+    shared = share.get("accounts") or {}
+    if code not in shared:
+        abort(404)
+
+    allowed = set(shared[code])
     # Performance is rendered by the P&L builder with a ?tab=performance
     # query string (mirrors the main dashboard), so 'pnl' access is granted
     # if either 'pnl' or 'performance' is in the share's allowed_tabs.
@@ -944,31 +1212,50 @@ def share_report(token: str, kind: str):
     else:
         abort(404)
 
-    code = share["account_code"]
-    log.info(f"share/report: token-id={share['id']} kind={kind} account={code}")
+    # Account-type gating: same rule as the main /report route. Defends
+    # against a stale share link whose allowed_tabs include CGT for what is
+    # now (or was always) a business account, or vice-versa.
+    accs = account_service.get_accounts()
+    acc_type = (accs.get(code) or {}).get("type", "personal")
+    if kind == "cgt" and acc_type != "personal":
+        abort(404)
+    if kind == "corporate_tax" and acc_type != "business":
+        abort(404)
+    # Same partial flag as the main /report route. Share dashboard fetches
+    # the partial fragment for in-place injection; legacy iframe consumers
+    # still get a full standalone document when partial=1 is absent.
+    as_partial = request.args.get("partial") == "1"
+    log.info(f"share/report: token-id={share['id']} kind={kind} account={code} partial={as_partial}")
     try:
         if kind == "tob":
             from reports import tob as _tob
-            html = _tob.build_tob_html(code)
-        elif kind in ("pnl", "performance"):
+            html = _tob.build_tob_html(code, as_partial=as_partial)
+        elif kind == "pnl":
             from reports import pnl as _pnl
-            html = _pnl.build_pnl_html(code)
+            html = _pnl.build_pnl_html(code, as_partial=as_partial)
+        elif kind == "performance":
+            from reports import pnl as _pnl
+            html = _pnl.build_pnl_html(code, as_partial=as_partial, sub_tab="performance")
         elif kind == "cgt":
             from reports import cgt as _cgt
-            html = _cgt.build_cgt_html(code)
+            html = _cgt.build_cgt_html(code, as_partial=as_partial)
+        elif kind == "corporate_tax":
+            from reports import corporate_tax as _ct
+            html = _ct.build_corporate_tax_html(code, as_partial=as_partial)
         elif kind == "dividends":
             from reports import dividends as _div
-            html = _div.build_dividends_html(code)
+            html = _div.build_dividends_html(code, as_partial=as_partial)
         elif kind == "methodology":
             from reports import methodology as _meth
-            html = _meth.build_methodology_html(code)
+            html = _meth.build_methodology_html(code, as_partial=as_partial)
         else:
             abort(404)
     except Exception as e:
         log.error(f"share/report FAILED kind={kind}: {e}")
         log.error(traceback.format_exc())
         raise
-    return Response(html, mimetype="text/html; charset=utf-8")
+    body = html if as_partial else _maybe_apply_embed_mode(html)
+    return Response(body, mimetype="text/html; charset=utf-8")
 
 
 # ---------- Admin routes for managing share links ----------
@@ -976,31 +1263,56 @@ def share_report(token: str, kind: str):
 @app.route("/share-links", methods=["POST"])
 @limiter.limit("10 per minute")
 def share_links_create():
-    """Admin-only: create a new view-only share link. Body (JSON):
+    """Admin-only: create a new view-only share link spanning one or more
+    accounts, each with its own allowed tab list. Body (JSON):
 
         {
-          "account_code": "B",
-          "allowed_tabs": ["tob", "pnl", "dividends"],
-          "label": "Accountant 2025 review",
+          "accounts": {
+            "P": ["tob", "pnl", "dividends"],
+            "B": ["tob", "corporate_tax", "dividends"]
+          },
+          "label": "Accountant 2025+2026",
           "expires_in_days": 30          # optional; null/missing = no expiry
         }
     """
     data = request.get_json(silent=True) or {}
-    account_code = (data.get("account_code") or "").strip().upper()
-    allowed_tabs = data.get("allowed_tabs") or []
+    accounts_in = data.get("accounts") or {}
     label = (data.get("label") or "").strip()
     expires_in_days = data.get("expires_in_days")
 
-    errors = []
+    errors: list[str] = []
     accs = account_service.get_accounts()
-    if account_code not in accs:
-        errors.append(f"unknown account_code {account_code!r}")
-    if not isinstance(allowed_tabs, list) or not allowed_tabs:
-        errors.append("allowed_tabs must be a non-empty list")
-    else:
-        bad = [t for t in allowed_tabs if t not in KNOWN_REPORT_KINDS]
-        if bad:
-            errors.append(f"unknown tabs: {bad}. Known: {list(KNOWN_REPORT_KINDS)}")
+
+    if not isinstance(accounts_in, dict) or not accounts_in:
+        errors.append("accounts must be a non-empty {account_code: [tabs]} object")
+
+    cleaned: dict[str, list[str]] = {}
+    if not errors:
+        for code, tabs in accounts_in.items():
+            code_norm = (code or "").strip().upper()
+            if code_norm not in accs:
+                errors.append(f"unknown account_code {code_norm!r}")
+                continue
+            if not isinstance(tabs, list) or not tabs:
+                errors.append(f"account {code_norm!r}: tabs must be a non-empty list")
+                continue
+            bad = [t for t in tabs if t not in KNOWN_REPORT_KINDS]
+            if bad:
+                errors.append(
+                    f"account {code_norm!r}: unknown tabs {bad}. "
+                    f"Known: {list(KNOWN_REPORT_KINDS)}"
+                )
+                continue
+            # Enforce account-type to tab compatibility at create time.
+            acc_type = (accs.get(code_norm) or {}).get("type", "personal")
+            if "cgt" in tabs and acc_type != "personal":
+                errors.append(f"account {code_norm!r}: CGT is personal-only")
+                continue
+            if "corporate_tax" in tabs and acc_type != "business":
+                errors.append(f"account {code_norm!r}: Corporate Tax is business-only")
+                continue
+            cleaned[code_norm] = tabs
+
     expires_at = None
     if expires_in_days not in (None, "", 0):
         try:
@@ -1020,8 +1332,7 @@ def share_links_create():
     try:
         share = db.create_share_link(
             conn,
-            account_code=account_code,
-            allowed_tabs=allowed_tabs,
+            accounts=cleaned,
             label=label,
             expires_at=expires_at,
         )
@@ -1029,9 +1340,94 @@ def share_links_create():
         conn.close()
         return jsonify({"ok": False, "errors": [str(e)]}), 400
     conn.close()
-    log.info(f"share-links/create: id={share['id']} account={account_code} "
-             f"tabs={share['allowed_tabs']} expires={expires_at}")
+    log.info(f"share-links/create: id={share['id']} accounts={cleaned} "
+             f"expires={expires_at}")
     return jsonify({"ok": True, "share": share})
+
+
+@app.route("/share-links/<int:share_id>", methods=["PATCH"])
+@limiter.limit("30 per minute")
+def share_links_update(share_id: int):
+    """Edit an existing share link's accounts, tabs, label, and expiry.
+    The URL token does NOT change: any existing recipient keeps the same
+    URL but their permission scope is updated immediately.
+
+    Body (JSON), same shape as POST /share-links:
+
+        {
+          "accounts": {"P": ["tob", "pnl"], "B": ["tob", "corporate_tax"]},
+          "label": "Accountant 2025+2026",
+          "expires_in_days": 30        # null = clear expiry; 0 also clears
+        }
+    """
+    data = request.get_json(silent=True) or {}
+    accounts_in = data.get("accounts") or {}
+    label = (data.get("label") or "").strip()
+    expires_in_days = data.get("expires_in_days")
+
+    errors: list[str] = []
+    accs = account_service.get_accounts()
+
+    if not isinstance(accounts_in, dict) or not accounts_in:
+        errors.append("accounts must be a non-empty {account_code: [tabs]} object")
+
+    cleaned: dict[str, list[str]] = {}
+    if not errors:
+        for code, tabs in accounts_in.items():
+            code_norm = (code or "").strip().upper()
+            if code_norm not in accs:
+                errors.append(f"unknown account_code {code_norm!r}")
+                continue
+            if not isinstance(tabs, list) or not tabs:
+                errors.append(f"account {code_norm!r}: tabs must be a non-empty list")
+                continue
+            bad = [t for t in tabs if t not in KNOWN_REPORT_KINDS]
+            if bad:
+                errors.append(f"account {code_norm!r}: unknown tabs {bad}")
+                continue
+            acc_type = (accs.get(code_norm) or {}).get("type", "personal")
+            if "cgt" in tabs and acc_type != "personal":
+                errors.append(f"account {code_norm!r}: CGT is personal-only")
+                continue
+            if "corporate_tax" in tabs and acc_type != "business":
+                errors.append(f"account {code_norm!r}: Corporate Tax is business-only")
+                continue
+            cleaned[code_norm] = tabs
+
+    # Expiry interpretation:
+    #   - missing key / empty string -> clear the expiry (link never expires)
+    #   - integer N -> expires N days from NOW (so editing extends from today)
+    expires_at = None
+    if expires_in_days not in (None, "", 0):
+        try:
+            days = int(expires_in_days)
+            if days <= 0 or days > 3650:
+                errors.append("expires_in_days must be 1..3650")
+            else:
+                from datetime import timedelta
+                expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            errors.append("expires_in_days must be an integer")
+    if errors:
+        return jsonify({"ok": False, "errors": errors}), 400
+
+    conn = db.connect()
+    db.init_schema(conn)
+    try:
+        ok = db.update_share_link(
+            conn, share_id,
+            accounts=cleaned,
+            label=label,
+            expires_at=expires_at,
+        )
+    except ValueError as e:
+        conn.close()
+        return jsonify({"ok": False, "errors": [str(e)]}), 400
+    conn.close()
+    if not ok:
+        return jsonify({"ok": False, "errors": ["share link not found"]}), 404
+    log.info(f"share-links/update: id={share_id} accounts={cleaned} expires={expires_at}")
+    return jsonify({"ok": True})
 
 
 @app.route("/share-links/<int:share_id>/revoke", methods=["POST"])

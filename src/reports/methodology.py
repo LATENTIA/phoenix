@@ -35,19 +35,24 @@ from reports.dividends import (
     US_DEFAULT_WHT_RATE,
     EXEMPTION_CAP_PER_YEAR,
 )
+from reports.corporate_tax import CIT_RATE
 from core.loaders import NON_DIVIDEND_TYPES
 
 
-def build_methodology_html(account_code: str | None = None) -> str:
+def build_methodology_html(account_code: str | None = None,
+                           as_partial: bool = False) -> str:
     """Render the methodology page. account_code is accepted but unused
     (page is account-agnostic); we keep the signature aligned with other
-    report builders so the dashboard wiring stays uniform."""
+    report builders so the dashboard wiring stays uniform.
+    `as_partial=True` returns the body fragment for the dashboard shell;
+    default returns a standalone document."""
     ctx = dict(
         now=datetime.now().strftime("%Y-%m-%d %H:%M"),
         belgian_rate_pct=BELGIAN_PRECOMPTE_RATE * 100,
         us_treaty_rate_pct=US_TREATY_WHT_RATE * 100,
         us_default_rate_pct=US_DEFAULT_WHT_RATE * 100,
         exemption_cap_per_year=EXEMPTION_CAP_PER_YEAR,
+        cit_rate_pct=int(CIT_RATE * 100),     # for the new section 10b
         non_dividend_types=sorted(NON_DIVIDEND_TYPES),
         account=ACCOUNT_ALIASES.get(account_code or "", account_code or ""),
     )
@@ -55,5 +60,6 @@ def build_methodology_html(account_code: str | None = None) -> str:
         "methodology.html",
         css_files=["css/dividends.css"],     # reuse the dividends styling
         js_files=["js/dividends.js"],        # tab + privacy toggle
+        as_partial=as_partial,
         **ctx,
     )

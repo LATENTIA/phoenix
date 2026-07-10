@@ -238,18 +238,40 @@ def _build_table_rows(display_df: pd.DataFrame) -> str:
         trade_date = row.get('TradeDate') or ''
         buysell = str(row.get('buySell') or '').strip()
 
-        def cell(val, decimals=None, css=''):
+        def cell(val, decimals=None, css='', col=''):
+            # `col` echoes the matching <th data-col=...> attribute so the
+            # filing-view CSS can hide a whole column with one selector.
             if decimals is not None:
                 txt = _fmt_num(val, decimals)
             elif pd.isna(val):
                 txt = ''
             else:
                 txt = str(val)
-            return f'<td class="{css}">{html.escape(txt)}</td>'
+            col_attr = f' data-col="{col}"' if col else ''
+            return f'<td class="{css}"{col_attr}>{html.escape(txt)}</td>'
 
+        # Smart quantity formatting:
+        #   * whole-number stocks (5, 100, -23)    -> '5'              '100'      '-23'
+        #   * small fractional crypto (0.001 BTC)  -> '0.001'
+        #   * fractional stocks (e.g. 12.5 ETF)    -> '12.5'
+        # Previous code did int(float(qty)), which truncated 0.5 BTC to 0
+        # and made every crypto row look like a zero-quantity trade.
         qty = row.get('quantity')
         try:
-            qty_str = f"{int(float(qty)):,}" if qty not in (None, '') and not pd.isna(qty) else ''
+            if qty in (None, '') or pd.isna(qty):
+                qty_str = ''
+            else:
+                q = float(qty)
+                if q == int(q):
+                    qty_str = f"{int(q):,}"
+                elif abs(q) < 1:
+                    # Tiny fractions: up to 8 decimals (BTC satoshi precision)
+                    # with trailing zeros stripped for readability.
+                    qty_str = f"{q:,.8f}".rstrip("0").rstrip(".")
+                else:
+                    # Larger fractions: 4 decimals is enough for any equity
+                    # and most crypto pairs.
+                    qty_str = f"{q:,.4f}".rstrip("0").rstrip(".")
         except (ValueError, TypeError):
             qty_str = str(qty)
 
@@ -269,26 +291,28 @@ def _build_table_rows(display_df: pd.DataFrame) -> str:
             f'data-symbol="{symbol_attr}" '
             f'data-commission="{data_commission}" '
             f'data-total-eur="{data_total_eur}" data-tob="{data_tob}">'
-            f'<td class="check-col"><input type="checkbox" class="row-check" checked></td>'
-            f'{cell(trade_date)}'
-            f'{cell(row.get("symbol"))}'
-            f'{cell(row.get("description"))}'
-            f'<td class="{buysell_class}">{html.escape(buysell)}</td>'
-            f'<td class="num">{html.escape(qty_str)}</td>'
-            f'{cell(row.get("tradePrice"), 4, "num")}'
-            f'{cell(row.get("proceeds"), 2, "num")}'
-            f'{cell(row.get("ibCommission"), 2, "num")}'
-            f'{cell(row.get("EUR_USD_Rate"), 4, "num")}'
-            f'<td><span class="src-{row.get("Rate_Source") or ""}">{html.escape(str(row.get("Rate_Source") or ""))}</span></td>'
-            f'{cell(total_eur, 2, "num")}'
-            f'{cell(tob, 2, "num")}'
+            f'<td class="check-col" data-col="check"><input type="checkbox" class="row-check" checked></td>'
+            f'{cell(trade_date, col="date")}'
+            f'{cell(row.get("symbol"), col="symbol")}'
+            f'{cell(row.get("description"), col="description")}'
+            f'<td class="{buysell_class}" data-col="side">{html.escape(buysell)}</td>'
+            f'<td class="num" data-col="qty">{html.escape(qty_str)}</td>'
+            f'{cell(row.get("tradePrice"), 4, "num", col="price")}'
+            f'{cell(row.get("proceeds"), 2, "num", col="proceeds-usd")}'
+            f'{cell(row.get("ibCommission"), 2, "num", col="commission")}'
+            f'{cell(row.get("EUR_USD_Rate"), 4, "num", col="fx")}'
+            f'<td data-col="fx-src"><span class="src-{row.get("Rate_Source") or ""}">{html.escape(str(row.get("Rate_Source") or ""))}</span></td>'
+            f'{cell(total_eur, 2, "num", col="total-eur")}'
+            f'{cell(tob, 2, "num", col="tob")}'
             '</tr>'
         )
     return '\n'.join(rows_html)
 
 
-def render_html(trades_df: pd.DataFrame, meta: dict) -> str:
-    """Render a self-contained HTML report for the trades DataFrame."""
+def render_html(trades_df: pd.DataFrame, meta: dict, as_partial: bool = False) -> str:
+    """Render the TOB report. `as_partial=True` returns only the body fragment
+    (no <html>/<head>/<body>) for the dashboard shell. Default returns a
+    self-contained HTML document for CLI export / accountant email handoff."""
     from core.templating import render_report
 
     display_df = trades_df[[c for c in DISPLAY_COLS if c in trades_df.columns]].copy()
@@ -321,6 +345,7 @@ def render_html(trades_df: pd.DataFrame, meta: dict) -> str:
         "tob.html",
         css_files=["css/tob.css"],
         js_files=["js/tob.js"],
+        as_partial=as_partial,
         account=meta.get('accountId', 'unknown'),
         period_str=f"{_fmt_date(meta.get('fromDate', ''))} → {_fmt_date(meta.get('toDate', ''))}",
         period_label=meta.get('period', ''),
@@ -334,10 +359,17 @@ def render_html(trades_df: pd.DataFrame, meta: dict) -> str:
     )
 
 
-def build_tob_html(account_code: str, use_overrides: bool = False) -> str:
+def build_tob_html(account_code: str, use_overrides: bool = False,
+                   as_partial: bool = False) -> str:
     """
     Compute and render the TOB report directly from the SQLite DB.
-    Returns the HTML string. Returns a "no data" placeholder if DB is empty for this account.
+    Returns the HTML string. Returns a "no data" placeholder if DB is empty
+    for this account.
+
+    `as_partial=True` returns the report body fragment (no <html>/<head>/
+    <body>) for inlining into the dashboard shell. The default returns a
+    complete standalone document — used by the CLI exporter and the
+    accountant-handoff email path.
     """
     from core import db as _db
     conn = _db.connect()
@@ -355,6 +387,14 @@ def build_tob_html(account_code: str, use_overrides: bool = False) -> str:
     trades_df['tradeDate'] = trades_df['tradeDate'].astype(str).str.replace('-', '', regex=False)
     trades_df['ibCommission'] = trades_df.get('commission_usd')
     trades_df['proceeds'] = trades_df.get('proceeds_usd')
+    # Derive Buy/Sell from quantity sign (IBKR convention: positive = buy,
+    # negative = sell). The CSV ingest path sets buySell explicitly, but the
+    # DB path has only `quantity`, so before this line every TOB row from the
+    # DB rendered with a blank side column.
+    _qty_num = pd.to_numeric(trades_df['quantity'], errors='coerce')
+    trades_df['buySell'] = _qty_num.apply(
+        lambda q: 'BUY' if pd.notna(q) and q > 0 else ('SELL' if pd.notna(q) and q < 0 else '')
+    )
 
     raw_dates = trades_df['tradeDate'].dropna().astype(str)
     raw_dates = raw_dates[raw_dates.str.match(r'^\d{8}$')]
@@ -369,7 +409,7 @@ def build_tob_html(account_code: str, use_overrides: bool = False) -> str:
     overrides = load_rate_overrides(name) if use_overrides else {}
     trades_df = add_eur_usd_rate(trades_df, rate_overrides=overrides)
     trades_df = add_eur_and_tob(trades_df)
-    return render_html(trades_df, meta)
+    return render_html(trades_df, meta, as_partial=as_partial)
 
 
 def main(argv=None) -> int:

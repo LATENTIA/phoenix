@@ -320,8 +320,10 @@ def _empty_report_html(account_code: str) -> str:
     return render("empty_report.html", kind="Dividends", account=name)
 
 
-def build_dividends_html(account_code: str) -> str:
-    """Compute the dividend report and render the HTML."""
+def build_dividends_html(account_code: str, as_partial: bool = False) -> str:
+    """Compute the dividend report and render the HTML.
+    `as_partial=True` returns the body fragment for the dashboard shell;
+    default returns a standalone document for CLI export."""
     conn = _db.connect()
     _db.init_schema(conn)
     div = _db.get_dividends(conn, account_code)
@@ -363,6 +365,7 @@ def build_dividends_html(account_code: str) -> str:
         by_symbol=by_symbol,
         per_payment=paired,
         sources=sources,
+        as_partial=as_partial,
     )
 
 
@@ -488,6 +491,7 @@ def render_html(
     by_symbol: pd.DataFrame,
     per_payment: pd.DataFrame,
     sources: list[dict],
+    as_partial: bool = False,
 ) -> str:
     annual_rows = _render_annual_rows(annual)
     symbol_rows = _render_symbol_rows(by_symbol)
@@ -560,6 +564,7 @@ def render_html(
         "dividends.html",
         css_files=["css/dividends.css"],
         js_files=["js/dividends.js"],
+        as_partial=as_partial,
         account=account,
         now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         # KPIs

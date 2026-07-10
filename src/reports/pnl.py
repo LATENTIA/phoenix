@@ -1149,8 +1149,14 @@ def _render_distribution_rows(bins: list[dict]) -> str:
 def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFrame,
                 all_trades: pd.DataFrame, ibkr_positions: pd.DataFrame,
                 reconcile_date: str | None,
-                account: str, method: str, sources: list[str]) -> str:
-    """Build all the row-HTML fragments and hand them to the Jinja `pnl.html` template."""
+                account: str, method: str, sources: list[str],
+                as_partial: bool = False,
+                sub_tab: str | None = None) -> str:
+    """Build all the row-HTML fragments and hand them to the Jinja `pnl.html`
+    template (or its content partial when `as_partial=True`).
+
+    `sub_tab` is forwarded to the template as the initial active sub-tab —
+    'performance' pre-activates the Performance panel + isolated-tab mode."""
 
     # Annual table rows
     annual_rows_html = []
@@ -1474,6 +1480,8 @@ def render_html(annual: pd.DataFrame, closed: pd.DataFrame, open_df: pd.DataFram
         "pnl.html",
         css_files=["css/pnl.css"],
         js_files=["js/pnl.js"],
+        as_partial=as_partial,
+        sub_tab=sub_tab or "",
         account=account,
         method=method,
         now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1514,10 +1522,22 @@ def _empty_report_html(account_code: str, kind: str) -> str:
     return render("empty_report.html", kind=kind, account=name)
 
 
-def build_pnl_html(account_code: str, method: str = "FIFO") -> str:
+def build_pnl_html(account_code: str, method: str = "FIFO",
+                   as_partial: bool = False,
+                   sub_tab: str | None = None) -> str:
     """
-    Compute the full P&L pipeline directly from the SQLite DB and render the report.
-    Returns the HTML string, or a 'no data' placeholder if the DB is empty for this account.
+    Compute the full P&L pipeline directly from the SQLite DB and render the
+    report. Returns the HTML string, or a 'no data' placeholder if the DB is
+    empty for this account.
+
+    `as_partial=True` returns the report body fragment for the dashboard
+    shell; default returns a standalone document for CLI export.
+
+    `sub_tab` pre-activates one of the partial's internal sub-tabs:
+        "performance" → activate the Performance panel + isolated-tab mode
+        None / other  → default (Current holdings)
+    The /report/performance/<account> route uses this so a direct URL or
+    initial paint lands on the right panel without needing a JS workaround.
     """
     method = method.upper()
     conn = _db.connect()
@@ -1561,6 +1581,8 @@ def build_pnl_html(account_code: str, method: str = "FIFO") -> str:
         annual, closed, open_df, df,
         open_positions_latest, reconcile_date,
         account_name, method, sources,
+        as_partial=as_partial,
+        sub_tab=sub_tab,
     )
 
 

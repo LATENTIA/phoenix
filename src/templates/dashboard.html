@@ -3,9 +3,28 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="csrf-token" content="{{ csrf_token() }}"/>
-  <title>Phoenix — {{ current_name|capitalize }}</title>
+  <title>Phoenix · {{ current_name|capitalize }}</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+
+  {# Newsreader = editorial headings; Source Sans 3 = UI; IBM Plex Mono =
+     tabular figures in tables and hero metrics. Single preconnect + one
+     stylesheet request per font family. #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+
+  {# Phase 2 inlines report content into this shell. The reports' CSS used
+     to be inlined per-render via render_report() (still works for the CLI
+     standalone path). Here we link them once so any injected partial has
+     its styles ready. Order matters: dashboard.css first (shell chrome),
+     then report stylesheets (their bare-element rules are scoped to
+     .report-shell / .container so they can't bleed onto the shell). #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tob.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pnl.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/cgt.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dividends.css') }}"/>
 </head>
 <body style="--accent-color: var(--{{ current_type }})">
 <div id="toasts" aria-live="polite"></div>
@@ -45,15 +64,14 @@
         <input name="query_id" required pattern="[0-9]+" placeholder="numeric ID from IBKR" autocomplete="off"/>
       </label>
 
-      <div class="notice" style="background:rgba(56,189,248,.08);border:1px solid var(--accent);
-                                  border-left:3px solid var(--accent);border-radius:6px;
-                                  padding:10px 14px;margin:8px 0 4px;font-size:.84rem;color:#bae6fd">
-        <strong>📌 Want dividend data in the Dividends report?</strong>
-        Edit the Flex Query in IBKR Client Portal and add the
+      <div class="notice" style="background:var(--phoenix-glow);border:1px solid var(--phoenix);
+                                  border-left:3px solid var(--phoenix);border-radius:var(--radius-sm);
+                                  padding:10px 14px;margin:8px 0 4px;font-size:.84rem;color:var(--text)">
+        <strong>Dividend data:</strong> in IBKR Client Portal, edit the Flex Query and add the
         <strong>Cash Transactions</strong> section, ticking
         <em>Dividends</em>, <em>Payment In Lieu of Dividends</em>, and
         <em>Withholding Tax</em>. Without it the current-year XML carries no
-        dividend rows and the Dividends report will only show data from your
+        dividend rows and the Dividends report only shows data from your
         annual CSV statements.
       </div>
 
@@ -68,7 +86,7 @@
 <!-- Add manual trade modal -->
 <div id="add-manual-trade-overlay" class="overlay" role="dialog" aria-modal="true">
   <div class="modal-box">
-    <h2>Add manual trade</h2>
+    <h2>Add trade</h2>
     <p class="muted" style="margin:0 0 14px;font-size:.85rem">
       Use this for trades that didn't come from IBKR (crypto exchanges,
       paper-trading corrections, family-account moves you want to track here).
@@ -144,94 +162,159 @@
   </div>
 </div>
 
+{% set s = statuses[current_name] %}
 
-<div class="container">
-  <div class="topbar">
-    <div class="title">
-      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="brand-mark"
-           width="36" height="46"/>
-      <h1>Phoenix</h1>
-      <span class="env-pill">{{ current_name }}</span>
+<div class="app">
+
+  {# ---------- Top bar ---------- #}
+  <header class="topbar">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt=""/>
+      <span class="name">Phoenix</span>
     </div>
-    <div class="env-switch">
-      {% for code, name in accounts.items() %}
-        {% set acc = accounts_full[code] %}
-        {% set t = acc.type %}
-        <span class="pill-wrap" style="--pill-color: var(--{{ t }})">
-          <a href="/?account={{ name }}"
-             class="pill {{ 'active' if name == current_name else '' }}"
-             title="{{ t }} account">
-            <span class="dot"></span>{{ name|capitalize }}
+
+    {# Account picker. A <details> tag gives us native open/close + outside-
+       click handling without any JS. The summary acts as the button. #}
+    <details class="account-dropdown">
+      <summary>
+        <span class="dot"></span>
+        <span>{{ current_name|capitalize }}</span>
+        <span class="muted" style="font-size:.75rem">{{ current_type }}</span>
+        <span class="caret">▾</span>
+      </summary>
+      <div class="menu">
+        {% for code, name in accounts.items() %}
+          {% set acc = accounts_full[code] %}
+          <a href="/?account={{ name }}" style="--account-c: var(--{{ acc.type }})">
+            <span class="dot" style="background:var(--{{ acc.type }})"></span>
+            <span>{{ name|capitalize }}</span>
+            <span class="muted" style="margin-left:auto;font-size:.75rem">{{ acc.type }}</span>
           </a>
-        </span>
-      {% endfor %}
-      <a href="#" onclick="openAddAccount();return false" title="Add new account"
-         style="color:var(--muted);padding:6px 12px;font-weight:600">＋</a>
-      <a href="/settings" title="Account management + destructive operations"
-         style="color:var(--muted);padding:6px 12px;font-weight:600">⚙</a>
-    </div>
-  </div>
+        {% endfor %}
+        <div class="divider"></div>
+        <a href="#" onclick="openAddAccount();return false" class="add">+ Add account</a>
+      </div>
+    </details>
 
-  {% set s = statuses[current_name] %}
-  <div class="card">
-    <div class="row">
-      <button class="primary" onclick="loadData('{{ current_code }}')">⚡ Load data</button>
-      <span class="muted" style="margin-left:8px">Download → ingest into DB → regenerate TOB &amp; P&amp;L</span>
-      <span style="flex:1"></span>
-      <button onclick="openAddManualTrade('{{ current_code }}')"
-              title="Add a stock or crypto trade that didn't come from IBKR">➕ Add manual trade</button>
-      <button onclick="fetchMarks('{{ current_code }}')" title="Fetch 2025-12-31 closing prices from Yahoo for the Belgian CGT basis reset">📊 Refresh year-end marks</button>
-    </div>
-    <div class="meta">
-      Last ingest:
-      {% if s.last_ingest %}
-        <strong>{{ s.last_ingest.mtime }}</strong> · {{ s.last_ingest.path }}
+    {# Sync status — single human-readable line. Raw row counts moved into
+       the <details> toggle so the surface stays calm. #}
+    <div class="sync-status">
+      {% if db_status.trades %}
+        <strong>{{ db_status.trades }}</strong> trades ingested
+        {%- if s.last_ingest %} · last sync {{ s.last_ingest.mtime }}{% endif -%}
       {% else %}
-        <em>never</em> (DB is empty for this account)
+        No data yet — use <strong>Sync from IBKR</strong> in the sidebar
       {% endif %}
-      · Flex on disk: {% if s.xmls %}{{ s.xmls|length }} file(s){% else %}none{% endif %}
+      <details class="tech-details" style="display:inline-block;margin-left:6px">
+        <summary style="cursor:pointer;color:var(--text-faint);font-size:.75rem">counts</summary>
+        <span style="margin-left:6px;font-size:.78rem;color:var(--text-muted)">
+          trades <strong>{{ db_status.trades }}</strong> ·
+          CA <strong>{{ db_status.corporate_actions }}</strong> ·
+          xfer <strong>{{ db_status.transfers }}</strong> ·
+          OP <strong>{{ db_status.open_positions }}</strong> ·
+          div <strong>{{ db_status.dividends }}</strong> ·
+          WHT <strong>{{ db_status.withholding_tax }}</strong> ·
+          FX <strong>{{ db_status.fx_rates }}</strong>
+        </span>
+      </details>
     </div>
-    <div class="meta" id="db-status">
-      DB: trades <strong>{{ db_status.trades }}</strong> ·
-      CA <strong>{{ db_status.corporate_actions }}</strong> ·
-      xfer <strong>{{ db_status.transfers }}</strong> ·
-      OP snapshots <strong>{{ db_status.open_positions }}</strong> ·
-      div <strong>{{ db_status.dividends }}</strong> ·
-      WHT <strong>{{ db_status.withholding_tax }}</strong> ·
-      FX <strong>{{ db_status.fx_rates }}</strong>
+
+    <div class="spacer"></div>
+    {# Single privacy toggle for the whole app — Phase 2C consolidated this
+       out of each report. Toggles body.privacy globally; report CSS rules
+       like body.privacy td.num still apply the blur via the same class. #}
+    <button id="privacy-toggle" class="icon-link"
+            title="Hide values · toggles a blur over every monetary figure">👁</button>
+    <a class="icon-link" href="/settings" title="Settings · destructive operations · share links">Settings</a>
+  </header>
+
+  {# ---------- Sidebar: filing nav + actions ---------- #}
+  <aside class="sidebar">
+    <div>
+      <div class="section-label">Filing</div>
+      {# Active tab tracks the server-rendered initial report. JS shows
+         the corresponding partial on first paint via initial_report_html
+         below; subsequent clicks fetch new partials. #}
+      {% set ik = initial_kind or 'tob' %}
+      <nav class="nav-filing" role="tablist">
+        <button class="nav-item {% if ik == 'tob' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                data-report="tob" onclick="showReport('tob')">TOB</button>
+        <button class="nav-item {% if ik == 'pnl' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                data-report="pnl" onclick="showReport('pnl')">P&amp;L</button>
+        <button class="nav-item {% if ik == 'performance' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                data-report="performance" onclick="showReport('performance')">Performance</button>
+
+        {# Tax tabs are account-type-specific (CGT 2026+ for personal, the
+           25% flat CIT for business). Render only the relevant one so the
+           accountant doesn't see a confusingly-mathematical tab. #}
+        {% if current_type == 'personal' %}
+          <button class="nav-item {% if ik == 'cgt' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                  data-report="cgt" onclick="showReport('cgt')"
+                  title="Belgian individual CGT 2026+ — 10% on gains above EUR 10k">CGT 2026+</button>
+        {% endif %}
+        {% if current_type == 'business' %}
+          <button class="nav-item {% if ik == 'corporate_tax' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                  data-report="corporate_tax" onclick="showReport('corporate_tax')"
+                  title="Belgian corporate income tax — 25% on broker activity">Corporate tax</button>
+        {% endif %}
+
+        <button class="nav-item {% if ik == 'dividends' %}active{% endif %}{% if not s.has_data %} empty{% endif %}"
+                data-report="dividends" onclick="showReport('dividends')">Dividends</button>
+        <button class="nav-item {% if ik == 'methodology' %}active{% endif %}" data-report="methodology"
+                onclick="showReport('methodology')"
+                title="How Phoenix calculates every figure in every report">Methodology</button>
+      </nav>
     </div>
+
+    <div>
+      <div class="section-label">Data</div>
+      <div class="sidebar-actions">
+        <button class="primary" onclick="loadData('{{ current_code }}')"
+                title="Download the latest Flex statement, ingest into the DB, and refresh every report">Sync from IBKR</button>
+        <button onclick="openAddManualTrade('{{ current_code }}')"
+                title="Manually add a stock or crypto trade that didn't come from IBKR">Add trade</button>
+        {# Year-end marks are only meaningful for the personal CGT basis
+           reset, so dashboard.js toggles this button based on the active
+           tab. Hidden by default; revealed when the CGT tab is selected. #}
+        <button id="btn-fetch-marks" style="display:none"
+                onclick="fetchMarks('{{ current_code }}')"
+                title="Fetch 2025-12-31 closing prices from Yahoo for the Belgian CGT basis reset">Update basis prices</button>
+      </div>
+    </div>
+  </aside>
+
+  {# ---------- Main: report viewer ---------- #}
+  <main class="main">
+    <div class="viewer" id="viewer">
+      {# Phase 2 — server-rendered first paint. If the account has data, we
+         inline the active report's partial directly into the viewer so the
+         first paint shows real content (no flash of "Loading…"). When the
+         user clicks another sidebar item, dashboard.js fetches that report's
+         partial and replaces this innerHTML. The hidden marker tells the JS
+         boot block that initial content was server-rendered, so it should
+         skip its own first-paint fetch. #}
+      {% if initial_report_html %}
+        <span id="initial-paint-marker"
+              data-report="{{ initial_kind }}"
+              style="display:none"></span>
+        {{ initial_report_html | safe }}
+      {% else %}
+        <div class="placeholder">
+          Pick a report from the sidebar to view it.
+          Run <code>Sync from IBKR</code> first if no data has been ingested yet.
+        </div>
+      {% endif %}
+    </div>
+    {# Activity stream for the Sync output. Populated by dashboard.js
+       loadData() — hidden until the first line appears. #}
     <div class="log" id="log"></div>
-  </div>
+    <footer class="app-footer">
+      Built by
+      <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>
+      · <a href="/license">Free for personal, non-commercial use</a>
+    </footer>
+  </main>
 
-  <div class="tabs" role="tablist">
-    <button class="tab active{% if not s.has_data %} empty{% endif %}"
-            data-report="tob" onclick="showReport('tob')">TOB</button>
-    <button class="tab{% if not s.has_data %} empty{% endif %}"
-            data-report="pnl" onclick="showReport('pnl')">P&amp;L</button>
-    <button class="tab{% if not s.has_data %} empty{% endif %}"
-            data-report="performance" onclick="showReport('performance')">Performance</button>
-    <button class="tab{% if not s.has_data %} empty{% endif %}"
-            data-report="cgt" onclick="showReport('cgt')">CGT 2026+</button>
-    <button class="tab{% if not s.has_data %} empty{% endif %}"
-            data-report="dividends" onclick="showReport('dividends')">Dividends</button>
-    <button class="tab" data-report="methodology" onclick="showReport('methodology')"
-            title="How Phoenix calculates every figure in every report">Methodology</button>
-  </div>
-
-  <div class="viewer" id="viewer">
-    <div class="placeholder">
-      Click <strong>TOB</strong>, <strong>P&amp;L</strong>, <strong>Performance</strong>, or
-      <strong>CGT 2026+</strong> above to view a report.
-      Click <code>⚡ Load data</code> first if nothing is generated yet.
-    </div>
-  </div>
-
-  <footer class="app-footer">
-    Built by
-    <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Latentia</a>
-    · <a href="/license">Free for personal, non-commercial use</a>
-    · <a href="https://www.latentia.ai/" target="_blank" rel="noopener">Commercial licensing on request</a>
-  </footer>
 </div>
 
 <script>const CURRENT_ACCOUNT = "{{ current_name }}";</script>

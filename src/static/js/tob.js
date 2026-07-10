@@ -98,17 +98,33 @@
 
   applyRange(dateFrom.value, dateTo.value);
 
-  // Privacy toggle
-  const privacyBtn = document.getElementById('privacy-toggle');
-  function applyPrivacy(on) {
-    document.body.classList.toggle('privacy', on);
-    privacyBtn.textContent = on ? '🙈' : '👁';
-    privacyBtn.title = on ? 'Show values' : 'Hide values';
+  // ---------- Filing view / Full detail toggle ----------
+  //
+  // Filing view hides verbose columns (description, price, USD proceeds,
+  // commission, EUR/USD, rate src) so the table fits 1280px without
+  // horizontal scroll and shows the columns an accountant actually
+  // needs: date, symbol, side, qty, total EUR, TOB EUR.
+  //
+  // Preference is per-session (sessionStorage). Default is filing view
+  // so first-time users get the slim layout.
+  function applyTobView(view) {
+    document.body.classList.toggle('filing-view', view === 'filing');
+    document.querySelectorAll('.view-toggle .view-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === view);
+    });
   }
-  privacyBtn.addEventListener('click', () => {
-    const on = !document.body.classList.contains('privacy');
-    localStorage.setItem('ibkr_privacy', on ? '1' : '0');
-    applyPrivacy(on);
+  const initialView = sessionStorage.getItem('phoenix_tob_view') || 'filing';
+  applyTobView(initialView);
+  document.querySelectorAll('.view-toggle .view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.view;
+      sessionStorage.setItem('phoenix_tob_view', v);
+      applyTobView(v);
+    });
   });
-  applyPrivacy(localStorage.getItem('ibkr_privacy') === '1');
+
+  // Privacy toggle is now owned by the dashboard shell (Phase 2C). Every
+  // partial injection used to re-bind a fresh click handler to the same
+  // #privacy-toggle button, which double-fired and cancelled itself out.
+  // The shell binds the handler exactly once at page load.
 })();

@@ -1,24 +1,96 @@
-:root {
-  --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
-  --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
-  --green:#4ade80; --red:#f87171; --border:#334155;
-}
+/* Palette tokens live in css/tokens.css — loaded once by the dashboard
+   shell (via dashboard.css @import) and prepended to standalone CLI
+   exports by render_report(). No more duplicate :root block here. */
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.4}
+body{margin:0;background:var(--bg);color:var(--text);
+     font-family:'Source Sans 3',-apple-system,"Segoe UI",Roboto,sans-serif;
+     line-height:1.45;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:'Newsreader','Source Serif Pro',Georgia,serif;font-weight:500}
+.num,code{font-family:'IBM Plex Mono',ui-monospace,"SF Mono",Consolas,monospace;
+          font-feature-settings:"tnum","zero"}
 
 .container{max-width:1400px;margin:0 auto;padding:32px 24px 64px}
-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;
+/* Scoped to .report-shell (partial path, injected into dashboard) AND
+   .container (standalone path, full document with the base template's
+   .container wrapper) so the rule doesn't bleed onto the dashboard
+   topbar's <header class="topbar"> when the report CSS is loaded into
+   the same document as the shell. */
+.report-shell header,
+.container header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;
        border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:28px}
 h1{margin:0;font-size:1.75rem;font-weight:600}
 h1 .account{color:var(--accent)}
 .meta{color:var(--muted);font-size:.9rem;text-align:right}
 .meta div + div{margin-top:2px}
 
+/* Filing-view / Full-detail toggle. JS adds body.filing-view by default
+   (and removes it for full view). The data-col attributes on every <th>
+   and <td> let us hide a logical column with a single CSS selector. */
+.view-toggle{display:inline-flex;border:1px solid var(--border);border-radius:6px;
+             overflow:hidden;margin-right:12px}
+.view-toggle .view-btn{background:transparent;color:var(--muted);border:0;
+                       padding:6px 12px;font:inherit;font-size:.85rem;cursor:pointer}
+.view-toggle .view-btn + .view-btn{border-left:1px solid var(--border)}
+.view-toggle .view-btn.active{background:var(--accent);color:#0f172a;font-weight:600}
+.view-toggle .view-btn:not(.active):hover{color:var(--accent)}
+
+body.filing-view table.trades th[data-col="description"],
+body.filing-view table.trades td[data-col="description"],
+body.filing-view table.trades th[data-col="price"],
+body.filing-view table.trades td[data-col="price"],
+body.filing-view table.trades th[data-col="proceeds-usd"],
+body.filing-view table.trades td[data-col="proceeds-usd"],
+body.filing-view table.trades th[data-col="commission"],
+body.filing-view table.trades td[data-col="commission"],
+body.filing-view table.trades th[data-col="fx"],
+body.filing-view table.trades td[data-col="fx"],
+body.filing-view table.trades th[data-col="fx-src"],
+body.filing-view table.trades td[data-col="fx-src"]{display:none}
+
+/* Hero metric — replaces the old 5-card KPI grid with one big number
+   (TOB due) and a small subtitle row of secondary figures. Pattern is
+   reused across reports (CGT, Dividends, Corporate tax) when Phase 3
+   continues. Mono font for the number, tax-due steel color so it reads
+   as "amount you owe" rather than "positive gain". */
+.hero{
+  display:flex;flex-direction:column;gap:8px;
+  padding:18px 22px;margin:0 0 24px;
+  background:var(--panel);border:1px solid var(--border);
+  border-left:3px solid var(--tax-due);border-radius:var(--radius-sm)
+}
+.hero .hero-label{
+  font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted)
+}
+.hero .hero-value{
+  font-family:var(--font-mono);font-feature-settings:"tnum","zero";
+  font-size:2.5rem;font-weight:600;line-height:1.05;color:var(--tax-due);
+  display:flex;align-items:baseline;gap:8px
+}
+.hero .hero-value .hero-unit{
+  font-size:1rem;font-weight:400;color:var(--muted);letter-spacing:.02em
+}
+.hero .hero-detail{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  font-size:.88rem;color:var(--muted);margin-top:2px
+}
+.hero .hero-detail strong{
+  color:var(--text);font-weight:600;font-family:var(--font-mono);
+  font-feature-settings:"tnum","zero"
+}
+.hero .hero-detail .sep{color:var(--text-faint);font-size:.7rem;opacity:.6}
+
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
 .card .label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
 .card .value{font-size:1.6rem;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
-.card.tob .value{color:var(--accent)}
+/* TOB due is an "amount owed", not a gain. The Night-ledger palette
+   reserves the cool steel `--tax-due` (#7dd3fc) for those figures so
+   they don't get mistaken for positive results in green. Same rationale
+   applies to CGT tax-due and the CIT Net-payable card; those use the
+   same token via their own report CSS. */
+.card.tob{border-left:3px solid var(--tax-due, #7dd3fc)}
+.card.tob .value{color:var(--tax-due, #7dd3fc)}
 
 .table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 table.trades{width:100%;border-collapse:collapse;font-size:.88rem}
@@ -29,7 +101,12 @@ table.trades tbody td{padding:8px 12px;border-bottom:1px solid var(--border);fon
 table.trades tbody tr:last-child td{border-bottom:none}
 table.trades tbody tr:hover{background:rgba(56,189,248,0.06)}
 
-td.num,th.num{text-align:right}
+/* Bump specificity over `table.trades thead th { text-align: left }` so
+   numeric headers (Quantity, Total, TOB) align to the right edge of their
+   column, matching the right-aligned values below. Without this, the header
+   sits on the left and the values sit on the right with empty space between. */
+table.trades thead th.num,
+table.trades tbody td.num{text-align:right}
 td.check-col,th.check-col{width:40px;text-align:center;padding:6px}
 input[type="checkbox"]{accent-color:var(--accent);cursor:pointer;width:16px;height:16px}
 
@@ -61,10 +138,13 @@ body.privacy .card .value:hover,
 body.privacy td.num:hover,
 body.privacy .count strong:hover{filter:none}
 
-#privacy-toggle{position:fixed;top:16px;right:16px;background:var(--panel);border:1px solid var(--border);
-       color:var(--text);border-radius:999px;width:38px;height:38px;font-size:1.1rem;line-height:1;
-       cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:100;padding:0}
-#privacy-toggle:hover{border-color:var(--accent);color:var(--accent)}
+/* The #privacy-toggle button lives in the dashboard topbar now (Phase 2C).
+   The old floating-pill styling that used to live here ID-targeted the
+   button globally, which leaked into the shell and turned the topbar
+   icon-link into a fixed-position circle overlapping Settings. Removed.
+   Standalone CLI exports also no longer ship a privacy-toggle button
+   (the base template still renders one in its block, but for embed-style
+   handoff documents the user can use their browser's print/blur instead). */
 
 .year-picker{display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .year-picker .label{color:var(--muted);font-size:.85rem;margin-right:4px}
@@ -73,4 +153,8 @@ body.privacy .count strong:hover{filter:none}
 .year-btn:hover{color:var(--text);border-color:var(--accent)}
 .year-btn.active{background:var(--accent);color:#0f172a;border-color:var(--accent);font-weight:600}
 
-footer{margin-top:24px;color:var(--muted);font-size:.8rem;text-align:center}
+/* Scoped: shell has its own <footer class="app-footer"> with a more
+   specific rule, but the bare `footer` rule's margin-top would still
+   stack onto it. Limit to .container (standalone path) only — the
+   partial path doesn't carry a footer; the shell provides one. */
+.container footer{margin-top:24px;color:var(--muted);font-size:.8rem;text-align:center}

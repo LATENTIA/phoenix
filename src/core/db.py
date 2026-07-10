@@ -181,8 +181,9 @@ CREATE TABLE IF NOT EXISTS fx_rates (
 CREATE TABLE IF NOT EXISTS share_links (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     token            TEXT UNIQUE NOT NULL,        -- 32 bytes URL-safe (~44 chars)
-    account_code     TEXT NOT NULL,
-    allowed_tabs     TEXT NOT NULL,               -- CSV: 'tob,pnl,dividends'
+    account_code     TEXT NOT NULL,               -- LEGACY: first account in accounts_json
+    allowed_tabs     TEXT NOT NULL,               -- LEGACY: that account's tabs as CSV
+    accounts_json    TEXT,                        -- {"P":["tob","pnl"],"B":["tob","corporate_tax"]}
     label            TEXT,
     created_at       TEXT NOT NULL,
     expires_at       TEXT,                        -- ISO 8601, NULL = never
@@ -272,6 +273,33 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate_add_manual_columns(conn)
     _migrate_canonicalise_source_paths(conn)
+    _migrate_share_links_multi_account(conn)
+    conn.commit()
+
+
+def _migrate_share_links_multi_account(conn: sqlite3.Connection) -> None:
+    """Add the accounts_json column to share_links (multi-account support)
+    and backfill it from the legacy single-account columns. Idempotent —
+    safe to run on every startup."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(share_links)").fetchall()}
+    if "accounts_json" not in cols:
+        conn.execute("ALTER TABLE share_links ADD COLUMN accounts_json TEXT")
+        conn.commit()
+    # Backfill any legacy rows where accounts_json is still NULL.
+    legacy = conn.execute(
+        "SELECT id, account_code, allowed_tabs FROM share_links "
+        "WHERE accounts_json IS NULL AND account_code IS NOT NULL"
+    ).fetchall()
+    if not legacy:
+        return
+    import json as _json
+    for r in legacy:
+        tabs = [t.strip() for t in (r["allowed_tabs"] or "").split(",") if t.strip()]
+        accounts_json = _json.dumps({r["account_code"]: tabs}, separators=(",", ":"))
+        conn.execute(
+            "UPDATE share_links SET accounts_json = ? WHERE id = ?",
+            (accounts_json, r["id"]),
+        )
     conn.commit()
 
 
@@ -963,34 +991,64 @@ import secrets as _stdlib_secrets
 
 
 def create_share_link(conn: sqlite3.Connection, *,
-                      account_code: str,
-                      allowed_tabs: list[str],
+                      accounts: dict[str, list[str]],
                       label: str = "",
                       expires_at: Optional[str] = None) -> dict:
-    """Generate a new view-only share link.
+    """Generate a new view-only share link spanning one or more accounts.
 
-    Returns a dict with `id`, `token` (use to build the URL), and other
-    fields the settings UI displays. The token is a 32-byte URL-safe
-    random string (~43 ASCII chars, ~256 bits of entropy)."""
-    if not allowed_tabs:
-        raise ValueError("allowed_tabs must contain at least one tab name")
+    `accounts` maps an account code to its allowed tabs:
+
+        {"P": ["tob", "pnl", "dividends"],
+         "B": ["tob", "corporate_tax", "dividends"]}
+
+    Returns a dict with `id`, `token`, `accounts`, and other display fields.
+    The token is a 32-byte URL-safe random string (~256 bits of entropy).
+
+    For backward compat with the legacy single-account schema, the row's
+    `account_code` and `allowed_tabs` columns are populated with the first
+    account's data (sorted by code for determinism). Nothing reads them
+    anymore in the share-routes code path; they exist only because they
+    were declared NOT NULL when the table was first created."""
+    import json as _json
+
+    if not isinstance(accounts, dict) or not accounts:
+        raise ValueError("accounts must be a non-empty {account_code: [tabs]} dict")
+
+    # Normalise: trim, lowercase tabs; drop empty codes / empty tab lists.
+    normalised: dict[str, list[str]] = {}
+    for code, tabs in accounts.items():
+        code = (code or "").strip()
+        if not code:
+            continue
+        clean_tabs = sorted({t.strip().lower() for t in (tabs or []) if t and t.strip()})
+        if not clean_tabs:
+            continue
+        normalised[code] = clean_tabs
+    if not normalised:
+        raise ValueError("no valid account/tab pairs supplied")
 
     token = _stdlib_secrets.token_urlsafe(32)
     created_at = datetime.utcnow().isoformat(timespec="seconds")
-    tabs_csv = ",".join(sorted(set(t.strip().lower() for t in allowed_tabs if t.strip())))
+    accounts_json = _json.dumps(normalised, separators=(",", ":"))
+
+    # Legacy columns: pick the first account (alphabetical) so the values
+    # are deterministic. Nothing in the read path uses them anymore.
+    legacy_code = sorted(normalised.keys())[0]
+    legacy_tabs_csv = ",".join(normalised[legacy_code])
 
     cur = conn.execute(
         """INSERT INTO share_links
-           (token, account_code, allowed_tabs, label, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (token, account_code, tabs_csv, label.strip()[:200], created_at, expires_at),
+           (token, account_code, allowed_tabs, accounts_json,
+            label, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (token, legacy_code, legacy_tabs_csv, accounts_json,
+         label.strip()[:200], created_at, expires_at),
     )
     conn.commit()
     return {
         "id": cur.lastrowid,
         "token": token,
-        "account_code": account_code,
-        "allowed_tabs": tabs_csv,
+        "accounts": normalised,
         "label": label.strip()[:200],
         "created_at": created_at,
         "expires_at": expires_at,
@@ -1001,11 +1059,15 @@ def create_share_link(conn: sqlite3.Connection, *,
 def validate_share_token(conn: sqlite3.Connection, token: str) -> Optional[dict]:
     """Return the share-link row if `token` is valid (exists, not revoked,
     not expired). None otherwise. Don't leak any other reason to the caller;
-    we want 404 on every failed validation, never 401/403."""
+    we want 404 on every failed validation, never 401/403.
+
+    The returned dict has an `accounts` key with the parsed multi-account
+    mapping (account_code -> list of allowed tab kinds)."""
+    import json as _json
     if not token:
         return None
     row = conn.execute(
-        """SELECT id, token, account_code, allowed_tabs, label,
+        """SELECT id, token, account_code, allowed_tabs, accounts_json, label,
                   created_at, expires_at, revoked, last_accessed_at
            FROM share_links WHERE token = ?""",
         (token,),
@@ -1017,7 +1079,21 @@ def validate_share_token(conn: sqlite3.Connection, token: str) -> Optional[dict]
     if row["expires_at"]:
         if row["expires_at"] < datetime.utcnow().isoformat(timespec="seconds"):
             return None
-    return dict(row)
+    out = dict(row)
+    # Parse the JSON column once for the caller. Fall back to the legacy
+    # single-account columns if accounts_json wasn't populated (shouldn't
+    # happen after the migration, but is defensive).
+    accounts: dict[str, list[str]] = {}
+    if out.get("accounts_json"):
+        try:
+            accounts = _json.loads(out["accounts_json"])
+        except (TypeError, ValueError):
+            accounts = {}
+    if not accounts and out.get("account_code"):
+        tabs = [t.strip() for t in (out.get("allowed_tabs") or "").split(",") if t.strip()]
+        accounts = {out["account_code"]: tabs}
+    out["accounts"] = accounts
+    return out
 
 
 def touch_share_link_access(conn: sqlite3.Connection, share_id: int) -> None:
@@ -1031,13 +1107,86 @@ def touch_share_link_access(conn: sqlite3.Connection, share_id: int) -> None:
 
 def list_share_links(conn: sqlite3.Connection) -> pd.DataFrame:
     """All share links, newest first. Includes revoked ones (settings UI
-    shows them greyed-out so the admin sees the history)."""
-    return pd.read_sql_query(
-        """SELECT id, token, account_code, allowed_tabs, label,
+    shows them greyed-out so the admin sees the history). Each row carries
+    an `accounts` dict parsed from `accounts_json`."""
+    import json as _json
+    df = pd.read_sql_query(
+        """SELECT id, token, account_code, allowed_tabs, accounts_json, label,
                   created_at, expires_at, revoked, last_accessed_at
            FROM share_links ORDER BY id DESC""",
         conn,
     )
+    if df.empty:
+        df["accounts"] = []      # ensure the column exists even when empty
+        return df
+
+    def _parse(row) -> dict[str, list[str]]:
+        if row.get("accounts_json"):
+            try:
+                parsed = _json.loads(row["accounts_json"])
+                if isinstance(parsed, dict) and parsed:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+        # Legacy fallback
+        if row.get("account_code"):
+            tabs = [t.strip() for t in (row.get("allowed_tabs") or "").split(",") if t.strip()]
+            return {row["account_code"]: tabs}
+        return {}
+
+    df["accounts"] = df.apply(_parse, axis=1)
+    return df
+
+
+def update_share_link(conn: sqlite3.Connection, share_id: int, *,
+                      accounts: dict[str, list[str]],
+                      label: str = "",
+                      expires_at: Optional[str] = None) -> bool:
+    """Replace an existing share link's accounts/tabs, label, and expiry.
+
+    The TOKEN, created_at, revoked, and last_accessed_at fields are
+    never touched, so the recipient's URL keeps working but their
+    permission scope changes immediately (next request sees the new
+    accounts_json).
+
+    `accounts` is the same shape as in create_share_link: a non-empty
+    {account_code: [tabs]} dict. Returns True if a row was updated.
+    Raises ValueError on bad input."""
+    import json as _json
+
+    if not isinstance(accounts, dict) or not accounts:
+        raise ValueError("accounts must be a non-empty {account_code: [tabs]} dict")
+    normalised: dict[str, list[str]] = {}
+    for code, tabs in accounts.items():
+        code = (code or "").strip()
+        if not code:
+            continue
+        clean_tabs = sorted({t.strip().lower() for t in (tabs or []) if t and t.strip()})
+        if not clean_tabs:
+            continue
+        normalised[code] = clean_tabs
+    if not normalised:
+        raise ValueError("no valid account/tab pairs supplied")
+
+    accounts_json = _json.dumps(normalised, separators=(",", ":"))
+    # Keep the legacy NOT NULL columns in sync with the first account
+    # (alphabetical) so an old reader, if any, sees consistent data.
+    legacy_code = sorted(normalised.keys())[0]
+    legacy_tabs_csv = ",".join(normalised[legacy_code])
+
+    cur = conn.execute(
+        """UPDATE share_links
+           SET account_code  = ?,
+               allowed_tabs  = ?,
+               accounts_json = ?,
+               label         = ?,
+               expires_at    = ?
+           WHERE id = ?""",
+        (legacy_code, legacy_tabs_csv, accounts_json,
+         label.strip()[:200], expires_at, share_id),
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def revoke_share_link(conn: sqlite3.Connection, share_id: int) -> bool:

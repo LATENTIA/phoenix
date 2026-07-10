@@ -5,6 +5,9 @@
   <meta name="csrf-token" content="{{ csrf_token() }}"/>
   <title>Phoenix · Settings</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo-tile.svg') }}"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
   <style>
     .danger-card{background:var(--panel);border:1px solid var(--border);
@@ -67,33 +70,90 @@
       border-radius:6px;padding:7px 10px;font:inherit;width:300px;max-width:100%}
     .share-tab-checkbox{display:inline-flex;align-items:center;gap:5px;
                         margin:0 12px 6px 0;font-size:.85rem}
-    /* Explicit button colours for the share-links section. Settings page
-       has no account context, so var(--accent-color) is undefined → the
-       default .primary rule renders as dark-on-dark and is invisible.
-       We force the cyan accent (#38bdf8) on every share button. */
+
+    /* One block per account in the create form. The whole block dims when
+       the "include this account" checkbox is off so it's visually obvious
+       that the tabs underneath are inactive. */
+    .share-account-block{padding:10px 12px;margin:8px 0;border:1px solid var(--border);
+                         border-radius:8px;background:rgba(255,255,255,.02)}
+    .share-account-block .share-account-toggle{display:flex;align-items:center;
+                                                gap:8px;font-weight:600;cursor:pointer}
+    .share-account-block .share-account-toggle .muted{font-weight:400}
+    .share-account-block .share-account-tabs{margin-top:8px;padding-left:24px;
+                                              opacity:.5;pointer-events:none;
+                                              transition:opacity .12s ease}
+    .share-account-block.included .share-account-tabs{opacity:1;pointer-events:auto}
+    /* When a row in the table covers multiple accounts, each gets its own line. */
+    .share-account-row{display:flex;align-items:center;gap:8px;margin:2px 0;
+                       font-size:.85rem;flex-wrap:wrap}
+    .share-account-row strong{min-width:80px}
+    /* Settings page has no per-account context, so var(--accent-color) is
+       not set on its body. The default button.primary rule from dashboard.css
+       reads --accent-color and would render the button as transparent text on
+       a transparent background here. We pin the share-section primary buttons
+       to the brand green (Phoenix green) so they stay visible. */
     .share-card button.primary,
     .share-url-box button.primary{
-      background:#38bdf8 !important;
-      border-color:#38bdf8 !important;
-      color:#0f172a !important;
+      background:var(--phoenix) !important;
+      border-color:var(--phoenix) !important;
+      color:#0a0908 !important;
     }
     .share-card button.primary:hover,
     .share-url-box button.primary:hover{
-      background:#7dd3fc !important;
-      border-color:#7dd3fc !important;
-      color:#0f172a !important;
+      background:var(--phoenix-dim) !important;
+      border-color:var(--phoenix-dim) !important;
+      color:#0a0908 !important;
     }
     .share-card button:not(.primary):not(.danger),
     .share-url-box button:not(.primary):not(.danger){
       background:transparent;
-      color:#e2e8f0;
-      border-color:#1f2937;
+      color:var(--text);
+      border-color:var(--border);
     }
     .share-card button:not(.primary):not(.danger):hover,
     .share-url-box button:not(.primary):not(.danger):hover{
-      border-color:#38bdf8;
-      color:#38bdf8;
+      border-color:var(--phoenix);
+      color:var(--phoenix);
     }
+
+    /* Settings page shell — mirrors the dashboard's topbar so the user
+       knows they're still "inside" Phoenix when navigating into Settings.
+       No sidebar (settings is a single linear page), just a top bar and
+       a max-width content column. */
+    .settings-topbar{
+      display:flex;align-items:center;gap:16px;
+      padding:12px 18px;
+      background:var(--surface);
+      border-bottom:1px solid var(--border);
+      min-width:0;
+    }
+    .settings-topbar .brand{display:flex;align-items:center;gap:10px;flex-shrink:0}
+    .settings-topbar .brand img{width:28px;height:36px}
+    .settings-topbar .brand .name{
+      font-family:var(--font-heading);font-size:1.1rem;font-weight:500;color:var(--text)
+    }
+    .settings-topbar h1.page-title{
+      font-family:var(--font-heading);font-size:1.05rem;font-weight:500;
+      color:var(--text-muted);margin:0
+    }
+    .settings-topbar .spacer{flex:1}
+    .settings-topbar a.back-link{
+      flex-shrink:0;white-space:nowrap;
+      color:var(--text-muted);text-decoration:none;font-size:.88rem;
+      padding:4px 8px;border-radius:var(--radius-sm)
+    }
+    .settings-topbar a.back-link:hover{color:var(--text);background:var(--surface-2)}
+
+    .settings-content{
+      max-width:1200px;
+      margin:0 auto;
+      padding:24px 24px 64px;
+    }
+    .settings-content h2{
+      font-family:var(--font-heading);font-weight:500;
+      font-size:1.15rem;margin:28px 0 10px;color:var(--text)
+    }
+    .settings-content h2:first-of-type{margin-top:6px}
 
     /* Modal that shows the newly-generated URL. Lives outside the create
        form so the form can collapse cleanly before this appears. */
@@ -133,10 +193,21 @@
   </div>
 </div>
 
-<div class="container">
+<header class="settings-topbar">
+  <div class="brand">
+    <img src="{{ url_for('static', filename='logo.svg') }}" alt=""/>
+    <span class="name">Phoenix</span>
+  </div>
+  <h1 class="page-title">Settings</h1>
+  <div class="spacer"></div>
   <a href="/" class="back-link">← Back to dashboard</a>
-  <h1 style="margin:0 0 4px">⚙ Settings</h1>
-  <p class="info-line">Destructive operations live here so they're one navigation step away from accidental clicks.</p>
+</header>
+
+<div class="settings-content">
+  <p class="info-line" style="margin-top:0">
+    Account management, FX rates, share links, and destructive operations.
+    The risky bits live one navigation step away from accidental clicks.
+  </p>
 
   <h2 style="margin:24px 0 8px;font-size:1.1rem">Accounts</h2>
   <div class="info-line">
@@ -191,31 +262,46 @@
     <button class="primary" onclick="toggleShareCreateForm()">+ Create new share link</button>
 
     <div class="share-create-form" id="share-create-form">
-      <label>
-        <span>Account</span>
-        <select id="share-create-account">
-          {% for code, acc in accounts_full.items() %}
-            <option value="{{ code }}">{{ acc.name }} ({{ acc.type }})</option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <label>
-        <span>Allowed tabs</span>
-        <div>
-          <label class="share-tab-checkbox"><input type="checkbox" value="tob" checked> TOB</label>
-          <label class="share-tab-checkbox"><input type="checkbox" value="pnl" checked> P&amp;L</label>
-          <label class="share-tab-checkbox"><input type="checkbox" value="performance"> Performance</label>
-          <label class="share-tab-checkbox"><input type="checkbox" value="cgt"> CGT 2026+</label>
-          <label class="share-tab-checkbox"><input type="checkbox" value="dividends" checked> Dividends</label>
-          <label class="share-tab-checkbox"><input type="checkbox" value="methodology"> Methodology</label>
+      {# This form serves both Create and Edit. The mode is tracked in the
+         JS variable `editingShareId` (null = create, integer = edit). The
+         title and the primary button label both swap based on mode. #}
+      <h3 id="share-form-title" style="margin:0 0 4px;font-size:.95rem">
+        Create new share link
+      </h3>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">
+        Tick the accounts the recipient should see, then choose which tabs
+        within each. You can edit these later without changing the URL.
+      </div>
+      {% for code, acc in accounts_full.items() %}
+        <div class="share-account-block"
+             data-code="{{ code }}"
+             data-type="{{ acc.type }}">
+          <label class="share-account-toggle">
+            <input type="checkbox" class="share-account-include"
+                   onchange="updateAccountBlock(this)"/>
+            <strong>{{ acc.name }}</strong>
+            <span class="muted">({{ acc.type }}, code <code>{{ code }}</code>)</span>
+          </label>
+          <div class="share-account-tabs">
+            <label class="share-tab-checkbox"><input type="checkbox" value="tob" checked> TOB</label>
+            <label class="share-tab-checkbox"><input type="checkbox" value="pnl" checked> P&amp;L</label>
+            <label class="share-tab-checkbox"><input type="checkbox" value="performance"> Performance</label>
+            {% if acc.type == 'personal' %}
+              <label class="share-tab-checkbox"><input type="checkbox" value="cgt"> CGT 2026+</label>
+            {% endif %}
+            {% if acc.type == 'business' %}
+              <label class="share-tab-checkbox"><input type="checkbox" value="corporate_tax" checked> Corporate Tax</label>
+            {% endif %}
+            <label class="share-tab-checkbox"><input type="checkbox" value="dividends" checked> Dividends</label>
+            <label class="share-tab-checkbox"><input type="checkbox" value="methodology"> Methodology</label>
+          </div>
         </div>
-      </label>
+      {% endfor %}
 
       <label>
         <span>Label (optional, your reference only)</span>
         <input type="text" id="share-create-label" maxlength="120"
-               placeholder="e.g. Accountant 2025 review"/>
+               placeholder="e.g. Accountant 2025+2026 (both accounts)"/>
       </label>
 
       <label>
@@ -225,15 +311,15 @@
 
       <div class="actions-inline" style="margin-top:14px">
         <button onclick="cancelShareCreate()">Cancel</button>
-        <button class="primary" onclick="doShareCreate()">Generate link</button>
+        <button class="primary" id="share-form-submit"
+                onclick="submitShareForm()">Generate link</button>
       </div>
     </div>
 
     {% if share_links %}
     <table class="share-table">
       <thead><tr>
-        <th>Account</th>
-        <th>Tabs</th>
+        <th>Accounts &amp; tabs</th>
         <th>Label</th>
         <th>Token (prefix)</th>
         <th>Created</th>
@@ -245,10 +331,17 @@
       <tbody>
       {% for s in share_links %}
         <tr class="{% if s.revoked %}revoked{% endif %}">
-          <td>{{ s.account_name }}</td>
           <td>
-            {% for t in s.allowed_tabs.split(',') %}
-              <span class="share-tab-pill">{{ t }}</span>
+            {# One line per account in the link, each followed by that
+               account's tab pills. Lets the admin see at a glance which
+               accountant gets which view. #}
+            {% for code, tabs in s.accounts.items() %}
+              <div class="share-account-row">
+                <strong>{{ s.account_names[code] }}</strong>
+                {% for t in tabs %}
+                  <span class="share-tab-pill">{{ t }}</span>
+                {% endfor %}
+              </div>
             {% endfor %}
           </td>
           <td>{{ s.label or '—' }}</td>
@@ -260,6 +353,12 @@
           <td class="actions">
             <div class="actions-inline">
               {% if not s.revoked %}
+                {# Edit re-opens the create form pre-filled with this link's
+                   current selections, so the operator can toggle accounts
+                   or tabs on/off without recreating the link. The URL token
+                   stays the same. Embedded data: accounts as JSON, label,
+                   absolute expires_at (the JS converts to days-from-now). #}
+                <button onclick='startEditShareLink({{ s.id }}, {{ s.accounts|tojson }}, {{ (s.label or "")|tojson }}, {{ (s.expires_at or "")|tojson }})'>Edit</button>
                 <button onclick="doShareRevoke({{ s.id }})">Revoke</button>
               {% endif %}
               <button class="danger" onclick="doShareDelete({{ s.id }})">Delete</button>
@@ -354,7 +453,17 @@
   async function doEmptyDb() {
     const t = toast('Wiping database...', {spin: true, duration: 0});
     try {
-      const res  = await fetchCsrf('/db/reset', {method:'POST'});
+      // Server-side confirm token: the route requires {"confirm": "DELETE"}
+      // in the body, so a scripted caller with credentials still has to
+      // know the magic word. The UI already gated this with "type DELETE";
+      // we forward the typed value verbatim.
+      const res  = await fetchCsrf('/db/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          confirm: document.getElementById('confirm-empty-input').value,
+        }),
+      });
       const data = await res.json();
       dismissToast(t);
       if (data.ok) {
@@ -385,7 +494,16 @@
   async function doDeleteAccount(id, name) {
     const t = toast(`Deleting account ${name}...`, {spin: true, duration: 0});
     try {
-      const res  = await fetchCsrf('/accounts/' + id, {method:'DELETE'});
+      // Server-side confirm token: the route requires {"confirm": "<name>"}
+      // in the body. We forward the typed value from the input so a server
+      // that doesn't match (typo / wrong UI version) refuses the delete.
+      const res  = await fetchCsrf('/accounts/' + id, {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          confirm: document.getElementById('confirm-input-' + id).value,
+        }),
+      });
       const data = await res.json();
       dismissToast(t);
       if (data.ok) {
@@ -436,13 +554,99 @@
   //      and a modal overlay appears with the URL + Copy + Done.
   //   3. Done closes the modal and reloads the page so the share-links
   //      table picks up the new row (the table is server-rendered).
+  // null = the form is in CREATE mode (Generate link).
+  // integer = the form is editing that share-link id (Save changes).
+  let editingShareId = null;
+
   function toggleShareCreateForm() {
-    document.getElementById('share-create-form').classList.toggle('show');
+    // Opening fresh always means create mode; close if already open.
+    const form = document.getElementById('share-create-form');
+    if (form.classList.contains('show')) {
+      collapseShareCreateForm();
+      return;
+    }
+    enterCreateMode();
+    form.classList.add('show');
+  }
+  function enterCreateMode() {
+    editingShareId = null;
+    document.getElementById('share-form-title').textContent = 'Create new share link';
+    document.getElementById('share-form-submit').textContent = 'Generate link';
+  }
+  function enterEditMode(shareId) {
+    editingShareId = shareId;
+    document.getElementById('share-form-title').textContent =
+      'Editing share link #' + shareId;
+    document.getElementById('share-form-submit').textContent = 'Save changes';
+  }
+  // Pre-fill the create form from an existing share link's selections so the
+  // operator can toggle accounts or tabs on/off without recreating the URL.
+  // Called from the Edit button on each table row.
+  function startEditShareLink(shareId, accountsDict, label, expiresAtIso) {
+    // 1. Reset every account block to unchecked, then apply the link's state.
+    document.querySelectorAll('.share-account-include').forEach(cb => {
+      cb.checked = false;
+      updateAccountBlock(cb);
+    });
+    document.querySelectorAll('.share-account-tabs input[type=checkbox]').forEach(cb => {
+      cb.checked = false;
+    });
+    Object.entries(accountsDict || {}).forEach(([code, tabs]) => {
+      const block = document.querySelector(`.share-account-block[data-code="${code}"]`);
+      if (!block) return;
+      const toggle = block.querySelector('.share-account-include');
+      toggle.checked = true;
+      updateAccountBlock(toggle);
+      (tabs || []).forEach(t => {
+        const cb = block.querySelector(`.share-account-tabs input[value="${t}"]`);
+        if (cb) cb.checked = true;
+      });
+    });
+
+    // 2. Label + expiry (convert ISO timestamp to days-from-now for the input).
+    document.getElementById('share-create-label').value = label || '';
+    document.getElementById('share-create-expires').value =
+      isoToDaysFromNow(expiresAtIso);
+
+    // 3. Flip UI into edit mode + reveal the form + scroll to it.
+    enterEditMode(shareId);
+    document.getElementById('share-create-form').classList.add('show');
+    document.querySelector('.share-card').scrollIntoView(
+      {behavior: 'smooth', block: 'start'}
+    );
+  }
+  // Convert an ISO 8601 (UTC, naive) timestamp into "N days from today",
+  // rounded UP. Returns "" if the input is empty/invalid/in the past so the
+  // form's number input simply shows blank ("no expiry").
+  function isoToDaysFromNow(iso) {
+    if (!iso) return '';
+    // The DB stores naive UTC ISO strings (no 'Z'). Append 'Z' so JS parses
+    // them as UTC, not as local time.
+    const exp = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+    if (isNaN(exp.getTime())) return '';
+    const diffMs = exp.getTime() - Date.now();
+    if (diffMs <= 0) return '';
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  }
+  // Visually dim a per-account block when its "include" toggle is off so the
+  // operator sees at a glance which accounts are in scope. The tab boxes
+  // inside an un-included block stay editable in the DOM but are pointer-
+  // disabled by CSS, and we skip them when building the POST body.
+  function updateAccountBlock(toggleInput) {
+    const block = toggleInput.closest('.share-account-block');
+    if (block) block.classList.toggle('included', toggleInput.checked);
   }
   function collapseShareCreateForm() {
     document.getElementById('share-create-form').classList.remove('show');
     document.getElementById('share-create-label').value = '';
     document.getElementById('share-create-expires').value = '';
+    // Reset all account toggles so the next open starts clean.
+    document.querySelectorAll('.share-account-include').forEach(cb => {
+      cb.checked = false;
+      updateAccountBlock(cb);
+    });
+    // Always exit edit mode when the form closes (cancel or after save).
+    enterCreateMode();
   }
   function cancelShareCreate() {
     collapseShareCreateForm();
@@ -452,26 +656,49 @@
     // Reload so the server-rendered share-links table includes the new row.
     location.reload();
   }
-  async function doShareCreate() {
-    const account_code = document.getElementById('share-create-account').value;
-    const allowed_tabs = Array.from(
-      document.querySelectorAll('#share-create-form .share-tab-checkbox input:checked')
-    ).map(cb => cb.value);
+  // Build the multi-account payload by walking each .share-account-block,
+  // skipping ones whose include-toggle is off. Returns:
+  //   {"P": ["tob","pnl",...], "B": ["tob","corporate_tax",...]}
+  function collectShareAccounts() {
+    const out = {};
+    document.querySelectorAll('.share-account-block').forEach(block => {
+      const toggle = block.querySelector('.share-account-include');
+      if (!toggle || !toggle.checked) return;
+      const tabs = Array.from(
+        block.querySelectorAll('.share-account-tabs input[type=checkbox]:checked')
+      ).map(cb => cb.value);
+      if (tabs.length === 0) return;        // no tabs picked = skip
+      out[block.dataset.code] = tabs;
+    });
+    return out;
+  }
+  // Form submit dispatcher. Picks the right backend call based on whether
+  // the form is currently in create mode (editingShareId === null) or edit
+  // mode (editingShareId is an integer). Both paths share the same input
+  // collection + validation so the user gets identical error feedback.
+  async function submitShareForm() {
+    const accounts = collectShareAccounts();
     const label = document.getElementById('share-create-label').value.trim();
     const expiresRaw = document.getElementById('share-create-expires').value.trim();
     const expires_in_days = expiresRaw === '' ? null : parseInt(expiresRaw, 10);
 
-    if (allowed_tabs.length === 0) {
-      toast('Pick at least one tab', {type: 'error', duration: 3000});
+    if (Object.keys(accounts).length === 0) {
+      toast('Tick at least one account and pick at least one tab inside it',
+            {type: 'error', duration: 3500});
       return;
     }
-
+    if (editingShareId === null) {
+      return doShareCreate({accounts, label, expires_in_days});
+    }
+    return doShareUpdate(editingShareId, {accounts, label, expires_in_days});
+  }
+  async function doShareCreate(payload) {
     const t = toast('Creating share link...', {spin: true, duration: 0});
     try {
       const res = await fetchCsrf('/share-links', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({account_code, allowed_tabs, label, expires_in_days}),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       dismissToast(t);
@@ -481,6 +708,31 @@
         collapseShareCreateForm();
         document.getElementById('share-url-text').textContent = url;
         document.getElementById('share-url-overlay').classList.add('show');
+      } else {
+        toast('Error: ' + (data.errors || []).join('; '), {type: 'error', duration: 5000});
+      }
+    } catch (e) {
+      dismissToast(t);
+      toast('Network error: ' + e.message, {type: 'error', duration: 4000});
+    }
+  }
+  // PATCH the link's accounts/tabs/label/expiry. Token stays the same;
+  // the recipient's URL keeps working but their permissions change on the
+  // next request. No URL re-reveal here, so no modal needed: just reload
+  // the page so the table reflects the new state.
+  async function doShareUpdate(shareId, payload) {
+    const t = toast('Saving changes...', {spin: true, duration: 0});
+    try {
+      const res = await fetchCsrf('/share-links/' + shareId, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      dismissToast(t);
+      if (data.ok) {
+        toast('Share link updated. Reloading...', {type: 'success', duration: 1800});
+        setTimeout(() => location.reload(), 900);
       } else {
         toast('Error: ' + (data.errors || []).join('; '), {type: 'error', duration: 5000});
       }

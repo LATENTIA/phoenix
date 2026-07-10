@@ -299,10 +299,13 @@ def _empty_report_html(account_code: str) -> str:
     return render("empty_report.html", kind="Belgian CGT", account=name)
 
 
-def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
+def build_cgt_html(account_code: str, method: str = "FIFO",
+                   as_partial: bool = False) -> str:
     """Compute the Belgian CGT pipeline and render the report.
 
     Returns the HTML string, or an "empty" placeholder if there's no data yet.
+    `as_partial=True` returns the body fragment for the dashboard shell;
+    default returns a standalone document.
     """
     method = method.upper()
     conn = _db.connect()
@@ -360,6 +363,7 @@ def build_cgt_html(account_code: str, method: str = "FIFO") -> str:
         auto_changes=auto_changes,
         account=ACCOUNT_ALIASES.get(account_code, account_code),
         method=method,
+        as_partial=as_partial,
     )
 
 
@@ -689,6 +693,7 @@ def render_html(
     auto_changes: list[dict],
     account: str,
     method: str,
+    as_partial: bool = False,
 ) -> str:
     annual_rows_html = _render_annual_rows(annual)
     per_trade_rows_html = _render_per_trade_rows(tax_trades)
@@ -710,6 +715,7 @@ def render_html(
         "cgt.html",
         css_files=["css/cgt.css"],
         js_files=["js/cgt.js"],
+        as_partial=as_partial,
         account=account,
         method=method,
         now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

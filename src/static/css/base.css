@@ -1,17 +1,28 @@
-/* Shared dark-theme variables and common styles */
+/* Shared variables — the "Night ledger" palette.
+ *
+ * Reports are rendered self-contained (their CSS is inlined into the page
+ * served by render_report()), so they cannot @import tokens.css from the
+ * shell. We mirror the same color values here. Names match the dashboard
+ * shell's tokens so future-Phoenix can drop these once reports become
+ * partials served inside the shell document. */
 :root {
-  --bg: #0f172a;
-  --panel: #1e293b;
-  --panel-2: #273449;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
-  --personal: #38bdf8;
-  --business: #f59e0b;
+  /* Surfaces: warm charcoal, NOT blue-slate */
+  --bg: #141210;
+  --panel: #1c1917;
+  --panel-2: #292524;
+  --border: #3f3a36;
+  /* Text */
+  --text: #fafaf9;
+  --muted: #a8a29e;
+  /* Brand: Phoenix green (logo color) */
+  --accent: #16a34a;
+  --personal: #16a34a;
+  --business: #d4a012;       /* warm gold, not neon orange */
+  /* Semantic */
   --green: #4ade80;
   --red: #f87171;
-  --orange: #fb923c;
-  --border: #334155;
+  --orange: #fbbf24;         /* warning amber */
+  --tax-due: #7dd3fc;        /* cool steel — reserved for "amount owed" */
 }
 
 * { box-sizing: border-box; }

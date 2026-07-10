@@ -1,112 +1,325 @@
-/* Dashboard-specific styles. Shared base variables come from base.css. */
-:root {
-  --bg:#0f172a; --panel:#1e293b; --panel-2:#273449;
-  --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
-  --personal:#38bdf8; --business:#f59e0b;
-  --green:#4ade80; --red:#f87171; --border:#334155;
-}
+/*
+ * Phoenix dashboard shell — "Night ledger" Phase 1.
+ *
+ * Layout: a 220px sidebar on the left holds the filing-nav links plus the
+ * Sync / Add-trade / Update-basis-prices action group at the bottom. The
+ * main area on the right is reserved for the report iframe (Phase 2 will
+ * inline it). The top bar is a single thin strip: logo + account dropdown
+ * + sync status + ⚙ Settings.
+ *
+ * Color and spacing come exclusively from tokens.css. Anything still using
+ * the legacy --panel / --accent aliases is OK — those resolve to the new
+ * tokens — but new rules should reference the canonical names directly.
+ */
+
+@import url('tokens.css');
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
-.container{max-width:1400px;margin:0 auto;padding:20px 24px 32px}
 
-.topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:16px}
-.title{display:flex;align-items:center;gap:10px}
-.title .brand-mark{display:block;flex-shrink:0}
-.title h1{margin:0;font-size:1.2rem;font-weight:600;letter-spacing:-0.5px}
-.title .env-pill{background:var(--accent-color);color:#0f172a;padding:4px 12px;border-radius:999px;
-     font-size:.8rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:var(--font-ui);font-size:14px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:"ss01" on;     /* Source Sans 3 alt 'a' */
+}
 
-.env-switch{display:flex;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:3px;gap:2px}
-.env-switch .pill-wrap{position:relative;display:inline-flex;align-items:center}
-.env-switch a.pill,.env-switch a:not(.pill){padding:6px 14px;border-radius:999px;color:var(--muted);
-     text-decoration:none;font-size:.85rem;font-weight:500;transition:all .15s;
-     display:inline-flex;align-items:center;gap:6px}
-.env-switch a:hover{color:var(--text)}
-.env-switch a .dot{width:8px;height:8px;border-radius:50%;background:var(--pill-color, var(--muted));flex-shrink:0}
-.env-switch a.pill.active{background:var(--pill-color, var(--accent-color));color:#0f172a;font-weight:600}
-.env-switch a.pill.active .dot{background:#0f172a;opacity:.6}
-.env-switch .pill-close{position:absolute;right:-2px;top:-4px;width:16px;height:16px;border-radius:50%;
-     border:none;background:var(--red);color:#fff;font-size:.7rem;line-height:1;
-     cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;opacity:.85}
-.env-switch .pill-wrap:hover .pill-close{display:flex}
-.env-switch .pill-close:hover{opacity:1;transform:scale(1.1)}
+h1,h2,h3,h4{font-family:var(--font-heading);font-weight:500;letter-spacing:-0.005em;margin:0}
+h1{font-size:1.45rem}
+h2{font-size:1.15rem}
+h3{font-size:1.0rem}
+code,.mono,.num{font-family:var(--font-mono);font-feature-settings:"tnum","zero"}
 
-.muted{color:var(--muted);font-size:.85rem}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:16px}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* ---------- App shell ---------- */
 
-button{background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;
-     padding:7px 14px;font:inherit;font-size:.88rem;cursor:pointer}
-button:hover{border-color:var(--accent-color);color:var(--accent-color)}
+/* App layout. Topbar and sidebar are FIXED so they stay in view while
+   the page scrolls naturally — no inner scrollbar inside .viewer. The
+   sidebar action buttons stay reachable at any scroll position. Main
+   content lives in normal flow with left + top padding to clear the
+   fixed chrome. */
+.app{
+  /* No grid; the fixed-positioned chrome handles placement. */
+  padding-top:var(--topbar-h);
+  padding-left:220px;
+  min-height:100vh;
+}
+
+:root{
+  /* Topbar height — used by .app padding above and the sidebar top
+     offset below so all three numbers stay in sync. */
+  --topbar-h:56px;
+}
+
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:20;
+  height:var(--topbar-h);
+  display:flex;align-items:center;gap:16px;
+  padding:0 18px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  /* Prevent horizontal overflow when sync-status text is long. */
+  min-width:0;
+}
+/* Right-side action links (privacy toggle, Settings) must NOT shrink —
+   they have short, fixed labels and need to stay readable. The flex
+   children that can absorb width pressure are .brand / .sync-status /
+   .spacer (the spacer absorbs first because it has no content). */
+.topbar .icon-link{flex-shrink:0;white-space:nowrap}
+.topbar .sync-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar .brand{display:flex;align-items:center;gap:10px}
+.topbar .brand img{display:block;width:28px;height:36px;flex-shrink:0}
+.topbar .brand .name{
+  font-family:var(--font-heading);font-size:1.1rem;font-weight:500;
+  color:var(--text);letter-spacing:-0.01em
+}
+.topbar .account-pill{
+  background:var(--accent-color, var(--phoenix));
+  color:#141210;padding:3px 10px;border-radius:999px;
+  font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase
+}
+.topbar .sync-status{color:var(--text-muted);font-size:.85rem}
+.topbar .sync-status strong{color:var(--text);font-weight:600}
+.topbar .spacer{flex:1}
+.topbar a.icon-link,.topbar button.icon-link{
+  background:transparent;border:0;color:var(--text-muted);
+  padding:4px 8px;cursor:pointer;text-decoration:none;font-size:.85rem;
+  border-radius:var(--radius-sm)
+}
+.topbar a.icon-link:hover,.topbar button.icon-link:hover{color:var(--text);background:var(--surface-2)}
+
+.sidebar{
+  /* Fixed at the left edge, below the topbar, full remaining height. */
+  position:fixed;left:0;top:var(--topbar-h);bottom:0;width:220px;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  padding:18px 12px;
+  display:flex;flex-direction:column;gap:24px;
+  overflow-y:auto;          /* very long nav lists can still scroll */
+}
+.sidebar .section-label{
+  font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--text-faint);font-weight:600;padding:0 8px 6px
+}
+.sidebar nav.nav-filing{display:flex;flex-direction:column;gap:2px}
+.sidebar .nav-item{
+  display:flex;align-items:center;justify-content:space-between;
+  background:transparent;border:0;color:var(--text-muted);
+  padding:8px 10px;border-radius:var(--radius-sm);
+  font:inherit;font-size:.92rem;cursor:pointer;text-align:left;
+  border-left:2px solid transparent;
+  transition:background .12s,color .12s,border-color .12s;
+}
+.sidebar .nav-item:hover{color:var(--text);background:var(--surface-2)}
+.sidebar .nav-item.active{
+  color:var(--text);background:var(--phoenix-glow);
+  border-left-color:var(--accent-color, var(--phoenix));font-weight:600
+}
+.sidebar .nav-item.empty{color:var(--text-faint);cursor:default}
+.sidebar .nav-item.empty:hover{background:transparent;color:var(--text-faint)}
+.sidebar .sidebar-actions{display:flex;flex-direction:column;gap:6px;padding:0 4px}
+
+.main{
+  /* No fixed/grid positioning — sits in normal flow inside .app (which
+     has padding-top + padding-left to clear the fixed topbar + sidebar).
+     Scrolling happens at the body / page level, not inside .main. */
+  background:var(--bg);
+  min-width:0;
+}
+.main .viewer{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  margin:14px 18px;
+  padding:16px 18px;
+  /* No `overflow: auto` — let the report content extend the page and
+     scroll via the browser's regular scrollbar. The fixed topbar +
+     sidebar stay visible the whole way down. */
+}
+.main .viewer .placeholder{
+  padding:48px 24px;text-align:center;color:var(--text-muted);font-size:.95rem
+}
+.main .viewer .placeholder code{background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-sm);color:var(--text)}
+
+/* Report partials still ship a <header><h1>Trade Statement — personal</h1>
+   ...</header> block at the top. The shell's topbar already shows the
+   account and the sidebar already shows the active tab, so the H1 is
+   redundant chrome eating vertical space. Shrink the header inside the
+   shell so the hero / cards / table get more room. The standalone CLI
+   export inherits this too — acceptable since the document's <title>
+   carries the same information. */
+.report-shell > header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border-soft);
+  padding-bottom:8px;margin-bottom:16px;
+}
+.report-shell > header h1{
+  font-family:var(--font-heading);font-size:1.0rem;font-weight:500;
+  color:var(--text-muted);margin:0;letter-spacing:0
+}
+.report-shell > header h1 .account,
+.report-shell > header h1 .tag{
+  color:var(--text);font-weight:500;
+  background:transparent;padding:0;letter-spacing:0
+}
+.report-shell > header .meta{
+  font-size:.78rem;color:var(--text-faint);text-align:right
+}
+.report-shell > header .meta div + div{margin-top:1px}
+
+/* Hide just the "Report built: ..." line in shell mode — the topbar's
+   sync status already covers "when was data last touched". Keep it for
+   standalone exports where there's no shell to provide that signal. */
+.report-shell > header .meta:last-of-type{display:none}
+
+.app-footer{
+  padding:10px 18px 18px;text-align:center;color:var(--text-faint);
+  font-size:.78rem;letter-spacing:.02em
+}
+.app-footer a{color:var(--text-faint);text-decoration:none;border-bottom:1px dotted var(--border)}
+.app-footer a:hover{color:var(--phoenix);border-bottom-color:var(--phoenix)}
+
+/* ---------- Account dropdown ---------- */
+
+.account-dropdown{position:relative}
+.account-dropdown summary{
+  list-style:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface-2);border:1px solid var(--border);
+  padding:5px 12px;border-radius:var(--radius-sm);
+  font-size:.88rem;color:var(--text);
+}
+.account-dropdown summary::-webkit-details-marker{display:none}
+.account-dropdown summary .caret{color:var(--text-faint);font-size:.7rem}
+.account-dropdown .dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--accent-color, var(--phoenix))
+}
+.account-dropdown[open] summary{border-color:var(--phoenix)}
+.account-dropdown .menu{
+  position:absolute;top:calc(100% + 6px);left:0;z-index:50;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:6px;min-width:200px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  display:flex;flex-direction:column;gap:2px
+}
+.account-dropdown .menu a{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:var(--radius-sm);
+  color:var(--text-muted);text-decoration:none;font-size:.88rem
+}
+.account-dropdown .menu a:hover{color:var(--text);background:var(--surface-2)}
+.account-dropdown .menu a .dot{width:6px;height:6px}
+.account-dropdown .menu .divider{height:1px;background:var(--border);margin:4px 0}
+.account-dropdown .menu a.add{color:var(--phoenix)}
+
+/* ---------- Buttons ---------- */
+
+button{
+  background:var(--surface-2);color:var(--text);
+  border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:7px 14px;font:inherit;font-size:.88rem;cursor:pointer;
+  font-family:var(--font-ui);
+  transition:background .12s,border-color .12s,color .12s
+}
+button:hover{border-color:var(--text-faint);color:var(--text)}
 button:disabled{opacity:.5;cursor:not-allowed}
-button.primary{background:var(--accent-color);color:#0f172a;border-color:var(--accent-color);font-weight:600}
-button.primary:hover{background:var(--accent-color);filter:brightness(1.1);color:#0f172a}
-button.danger{background:transparent;color:var(--red);border-color:var(--red)}
-button.danger:hover{background:rgba(248,113,113,.12);color:var(--red);border-color:var(--red)}
 
-.meta{color:var(--muted);font-size:.8rem;margin-top:8px}
-.meta a{color:var(--accent-color);text-decoration:none}
-.meta a:hover{text-decoration:underline}
+button.primary{
+  background:var(--phoenix);color:#0a0908;
+  border-color:var(--phoenix);font-weight:600
+}
+button.primary:hover{background:var(--phoenix-dim);border-color:var(--phoenix-dim);color:#0a0908}
 
-.log{background:#0b1220;border:1px solid var(--border);border-radius:6px;padding:10px 12px;
-     font-family:"SF Mono","Consolas",monospace;font-size:.75rem;line-height:1.45;white-space:pre-wrap;
-     max-height:240px;overflow:auto;margin-top:10px;color:var(--muted);display:none}
-.log.show{display:block}
-.log .err{color:var(--red)}
-.log .ok{color:var(--green)}
+button.danger{background:transparent;color:var(--loss);border-color:var(--loss)}
+button.danger:hover{background:rgba(248,113,113,.12);color:var(--loss);border-color:var(--loss)}
 
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.tab{background:transparent;border:none;color:var(--muted);padding:10px 18px;font:inherit;font-size:.9rem;
-     cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
-     transition:color .15s,border-color .15s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--accent-color);border-bottom-color:var(--accent-color)}
-.tab.empty{color:var(--border);cursor:default}
-.tab.empty:hover{color:var(--border)}
+.sidebar-actions button{width:100%;text-align:left}
 
-.viewer{background:var(--panel);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;
-        min-height:75vh;overflow:hidden;position:relative}
-.viewer iframe{width:100%;height:85vh;border:0;display:block;background:white}
-.viewer .placeholder{padding:60px 24px;text-align:center;color:var(--muted);font-size:.95rem}
-.viewer .placeholder code{background:var(--panel-2);padding:2px 6px;border-radius:4px;color:var(--text)}
+/* ---------- Toasts ---------- */
 
-/* Modals (Add account + Empty DB) */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);
-  display:none;align-items:center;justify-content:center;z-index:2000}
-.overlay.show{display:flex}
-.confirm-box,.modal-box{background:var(--panel);border:1px solid var(--border);
-  border-radius:12px;padding:24px;max-width:480px;box-shadow:0 12px 32px rgba(0,0,0,.5)}
-.confirm-box{border-color:var(--red)}
-.confirm-box h2{margin:0 0 8px;color:var(--red);font-size:1.1rem;display:flex;align-items:center;gap:8px}
-.modal-box{min-width:420px}
-.modal-box h2{margin:0 0 8px;color:var(--text);font-size:1.15rem}
-.confirm-box p,.modal-box p{margin:8px 0 16px;color:var(--text);font-size:.9rem;line-height:1.5}
-.confirm-box code,.modal-box code{background:var(--panel-2);padding:2px 6px;border-radius:4px;font-size:.85rem}
-.confirm-box .actions,.modal-box .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
-.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
-.field>span{font-size:.82rem;color:var(--muted)}
-.field input,.field select{background:var(--bg);color:var(--text);border:1px solid var(--border);
-  border-radius:6px;padding:8px 10px;font:inherit;font-size:.9rem}
-.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
-
-/* Toasts */
 #toasts{position:fixed;top:20px;left:50%;transform:translateX(-50%);
        z-index:1000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 16px;
-      font-size:.9rem;box-shadow:0 8px 24px rgba(0,0,0,0.4);
-      min-width:240px;max-width:480px;color:var(--text);
-      opacity:0;transform:translateY(-12px);transition:all .25s ease;
-      display:flex;align-items:center;gap:10px;pointer-events:auto}
+.toast{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:10px 16px;font-size:.9rem;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  min-width:240px;max-width:480px;color:var(--text);
+  opacity:0;transform:translateY(-12px);transition:all .25s ease;
+  display:flex;align-items:center;gap:10px;pointer-events:auto
+}
 .toast.show{opacity:1;transform:translateY(0)}
-.toast .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--accent-color)}
-.toast.success .dot{background:var(--green)}
-.toast.error .dot{background:var(--red)}
-.toast .spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent-color);
-      border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.toast .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--phoenix)}
+.toast.success .dot{background:var(--gain)}
+.toast.error .dot{background:var(--loss)}
+.toast .spin{
+  width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--phoenix);
+  border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0
+}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* App footer attribution (subtle) */
-.app-footer{margin:32px 0 8px;text-align:center;color:var(--muted);
-            font-size:.78rem;letter-spacing:.02em}
-.app-footer a{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--border)}
-.app-footer a:hover{color:var(--accent-color);border-bottom-color:var(--accent-color)}
+/* ---------- Modals (Add account + Add manual trade) ---------- */
+
+.overlay{
+  position:fixed;inset:0;background:rgba(10,9,8,.72);
+  display:none;align-items:center;justify-content:center;z-index:2000
+}
+.overlay.show{display:flex}
+.modal-box{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:24px;max-width:480px;min-width:420px;
+  box-shadow:0 12px 40px rgba(0,0,0,.55)
+}
+.modal-box h2{margin:0 0 8px;color:var(--text);font-size:1.15rem}
+.modal-box p{margin:8px 0 16px;color:var(--text);font-size:.9rem;line-height:1.5}
+.modal-box code{background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-sm);font-size:.85rem}
+.modal-box .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field>span{font-size:.82rem;color:var(--text-muted)}
+.field input,.field select{
+  background:var(--bg);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:8px 10px;font:inherit;font-size:.9rem
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--phoenix)}
+
+/* ---------- Activity log (Sync output stream) ---------- */
+
+.log{
+  background:#0a0908;border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:10px 12px;font-family:var(--font-mono);font-size:.78rem;line-height:1.5;
+  white-space:pre-wrap;max-height:240px;overflow:auto;
+  color:var(--text-muted);display:none;margin:0 18px 14px
+}
+.log.show{display:block}
+.log .err{color:var(--loss)}
+.log .ok{color:var(--gain)}
+
+/* ---------- Shared helpers ---------- */
+
+.muted{color:var(--text-muted);font-size:.85rem}
+.tech-details summary{font-size:.78rem}
+.tech-details[open] summary{color:var(--text)}
+
+/* ---------- Responsive: collapse sidebar at narrow widths ---------- */
+
+/* Narrow viewport: drop the fixed sidebar in favour of a horizontal nav
+   strip below the topbar. The fixed topbar stays. */
+@media (max-width: 900px) {
+  .app{padding-left:0;padding-top:calc(var(--topbar-h) + 46px)}
+  .sidebar{
+    position:fixed;top:var(--topbar-h);left:0;right:0;bottom:auto;width:auto;
+    flex-direction:row;flex-wrap:wrap;
+    border-right:0;border-bottom:1px solid var(--border);
+    padding:6px 12px;gap:8px;
+    overflow-x:auto;overflow-y:hidden;
+    z-index:15
+  }
+  .sidebar .section-label{display:none}
+  .sidebar nav.nav-filing{flex-direction:row;flex-wrap:wrap;flex:1;gap:0}
+  .sidebar .nav-item{padding:6px 10px;border-left:0;border-bottom:2px solid transparent}
+  .sidebar .nav-item.active{
+    border-left:0;border-bottom-color:var(--accent-color, var(--phoenix));
+    background:transparent
+  }
+  .sidebar .sidebar-actions{flex-direction:row;flex-wrap:wrap}
+  .sidebar-actions button{width:auto}
+}

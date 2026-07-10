@@ -20,17 +20,6 @@
     }
   }
 
-  // Privacy toggle
-  const privacyBtn = document.getElementById('privacy-toggle');
-  function applyPrivacy(on) {
-    document.body.classList.toggle('privacy', on);
-    privacyBtn.textContent = on ? '🙈' : '👁';
-    privacyBtn.title = on ? 'Show values' : 'Hide values';
-  }
-  privacyBtn.addEventListener('click', () => {
-    const on = !document.body.classList.contains('privacy');
-    localStorage.setItem('ibkr_privacy', on ? '1' : '0');
-    applyPrivacy(on);
-  });
-  applyPrivacy(localStorage.getItem('ibkr_privacy') === '1');
+  // Privacy toggle owned by the dashboard shell (Phase 2C). See tob.js
+  // for the rationale.
 })();
