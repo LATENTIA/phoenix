@@ -1,0 +1,145 @@
+{# Wrapped in .report-shell so report CSS scopes cleanly when injected
+   into the dashboard shell (Phase 2). #}
+<div class="report-shell" data-report="corporate_tax">
+  <h1>Corporate tax (CIT), <span class="account">{{ account }}</span></h1>
+  <div class="muted">
+    Indicative Belgian corporate income tax contribution from broker activity.
+    Use as input to the company's tax return, not as the filed number.
+  </div>
+
+  {# ---------------------------------------------------------------- #}
+  {# KPI cards: lifetime totals across every year in the broker history. #}
+  {# ---------------------------------------------------------------- #}
+  <section class="cards" style="margin-top:16px">
+    <div class="card pnl"><div class="label">Realised gains (EUR)</div>
+      <div class="value pos">{{ "{:,.2f}".format(totals.gains_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Realised losses (EUR)</div>
+      <div class="value neg">{{ "{:,.2f}".format(totals.losses_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Net realised P&amp;L (EUR)</div>
+      <div class="value">{{ "{:,.2f}".format(totals.realized_net_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Dividends gross (EUR)</div>
+      <div class="value pos">{{ "{:,.2f}".format(totals.gross_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Foreign WHT paid (EUR)</div>
+      <div class="value neg">{{ "{:,.2f}".format(totals.wht_eur) }}</div></div>
+    <div class="card pnl"><div class="label">CIT base contribution (EUR)</div>
+      <div class="value">{{ "{:,.2f}".format(totals.cit_base_eur) }}</div></div>
+    <div class="card pnl"><div class="label">CIT @ {{ cit_rate_pct }}% gross (EUR)</div>
+      <div class="value neg">{{ "{:,.2f}".format(-totals.cit_due_eur) }}</div></div>
+    <div class="card pnl"><div class="label">FTC credit (EUR)</div>
+      <div class="value pos">{{ "{:,.2f}".format(totals.ftc_eur) }}</div></div>
+    <div class="card pnl"><div class="label">Net CIT payable (EUR)</div>
+      <div class="value neg"><strong>{{ "{:,.2f}".format(-totals.cit_payable_eur) }}</strong></div></div>
+  </section>
+
+  {# ---------------------------------------------------------------- #}
+  {# Rules box: makes the framework explicit so the accountant can     #}
+  {# audit the numbers without reading the source.                     #}
+  {# ---------------------------------------------------------------- #}
+  <div class="rules-box">
+    <strong>Belgian corporate income tax, how this report computes it:</strong>
+    <ul>
+      <li><strong>Flat rate: {{ cit_rate_pct }}%.</strong> Applied to every line of investment
+          income; the company's other taxable items (operating profit, salaries,
+          depreciations, prior-year losses) sit outside this report.</li>
+      <li><strong>Realised capital gains and losses</strong> on stocks (and on crypto, which
+          Belgian CIT treats as ordinary income) BOTH feed the CIT base. Losses are
+          fully deductible against any corporate income, unlike for individuals.</li>
+      <li><strong>Dividends</strong> enter the base at the <strong>GROSS</strong> amount. The
+          foreign WHT shown on the broker statement is NOT a deduction; it's a
+          credit (FTC) against the Belgian CIT owed on those same dividends.</li>
+      <li><strong>FTC cap</strong>: the credit is capped per dividend at the Belgian CIT
+          that would otherwise be due on that dividend
+          ({{ cit_rate_pct }}% × gross). If you paid 15% US WHT, you get 15% back;
+          if you paid 30% (e.g. no W-8BEN), only 25% offsets, the rest is lost.</li>
+      <li><strong>Participation exemption (100% exempt) NOT applied.</strong> Belgian CIT
+          exempts dividends and capital gains on shares when the company holds
+          ≥10% of the issuer OR ≥EUR 2.5M acquisition value, held ≥1 year, plus
+          the issuer must be properly taxed. A typical IBKR portfolio of small
+          positions never qualifies, so this report assumes none of them do.
+          If you DO hold a strategic stake, flag it with your accountant.</li>
+      <li><strong>Unrealised gains are ignored.</strong> Belgian corporate accounts use
+          historical-cost accounting; mark-to-market only triggers an impairment
+          loss, which Phoenix does not (yet) model.</li>
+      <li>EUR amounts use the ECB EUR/USD reference rate on each event date.</li>
+    </ul>
+    <div class="muted" style="margin-top:6px">
+      Source: PwC Worldwide Tax Summaries, Belgium / Corporate / Income determination.
+      Phoenix is an audit-trail tool, not a tax-advice tool. Hand these numbers to
+      your accountant and let them apply the rules that depend on info Phoenix can't see
+      (prior-year losses, group taxation, exemption thresholds at the entity level).
+    </div>
+  </div>
+
+  {# ---------------------------------------------------------------- #}
+  {# Tabs: by-year overview, per-trade detail, per-dividend detail.    #}
+  {# ---------------------------------------------------------------- #}
+  {# Single tab: the per-year CIT roll-up is the unique value of this report.
+     Per-trade detail lives in the P&L tab; per-dividend detail lives in the
+     Dividends tab; provenance lives in the Sources panel of those reports.
+     Duplicating them here would just add noise. #}
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-target="tab-annual" role="tab">By year</button>
+  </div>
+
+  {# By year #}
+  <div id="tab-annual" class="tab-panel active" role="tabpanel">
+    <h3>Per-year CIT summary</h3>
+    <div class="muted" style="margin-bottom:8px">
+      Each row shows the CIT contribution from broker activity for that calendar
+      year. <em>CIT base</em> = realised net + dividends gross. <em>CIT due</em>
+      = base × {{ cit_rate_pct }}%. <em>FTC</em> = creditable foreign WHT (capped).
+      <em>Net payable</em> = CIT due − FTC, clipped at zero.
+    </div>
+    <table class="math-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th class="num">Closed lots</th>
+          <th class="num">Gains (EUR)</th>
+          <th class="num">Losses (EUR)</th>
+          <th class="num">Realised net</th>
+          <th class="num">Divs gross</th>
+          <th class="num">Foreign WHT</th>
+          <th class="num">CIT base</th>
+          <th class="num">CIT @ {{ cit_rate_pct }}%</th>
+          <th class="num">FTC</th>
+          <th class="num"><strong>Net payable</strong></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if annual %}
+          {% for r in annual %}
+          <tr>
+            <td>{{ r.year }}</td>
+            <td class="num muted">{{ r.n_closed|int }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(r.gains_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(r.losses_eur) }}</td>
+            <td class="num">{{ "{:,.2f}".format(r.realized_net_eur) }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(r.gross_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(r.wht_eur) }}</td>
+            <td class="num">{{ "{:,.2f}".format(r.cit_base_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(-r.cit_due_eur) }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(r.ftc_eur) }}</td>
+            <td class="num neg"><strong>{{ "{:,.2f}".format(-r.cit_payable_eur) }}</strong></td>
+          </tr>
+          {% endfor %}
+          <tr style="border-top:2px solid var(--border);font-weight:600">
+            <td>Total</td>
+            <td class="num muted">{{ annual|sum(attribute='n_closed')|int }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(totals.gains_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(totals.losses_eur) }}</td>
+            <td class="num">{{ "{:,.2f}".format(totals.realized_net_eur) }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(totals.gross_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(totals.wht_eur) }}</td>
+            <td class="num">{{ "{:,.2f}".format(totals.cit_base_eur) }}</td>
+            <td class="num neg">{{ "{:,.2f}".format(-totals.cit_due_eur) }}</td>
+            <td class="num pos">{{ "{:,.2f}".format(totals.ftc_eur) }}</td>
+            <td class="num neg"><strong>{{ "{:,.2f}".format(-totals.cit_payable_eur) }}</strong></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11" class="muted">No realised activity or dividends yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>{# /.report-shell #}

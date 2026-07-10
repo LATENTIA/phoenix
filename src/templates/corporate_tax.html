@@ -1,0 +1,12 @@
+{% extends "_base_report.html" %}
+{% block title %}Corporate Tax · {{ account }}{% endblock %}
+{% block footer_meta %}
+  Belgian CIT framework: 25% flat rate · participation exemption NOT applied (small-portfolio assumption) ·
+  foreign WHT applied as FTC capped at the Belgian CIT on the same dividend ·
+  source: PwC Worldwide Tax Summaries
+{% endblock %}
+{% block content %}
+  {# Same body for the dashboard shell (inline) and this self-contained
+     full-document path (CLI / accountant email export). #}
+  {% include "partials/corporate_tax_content.html" %}
+{% endblock %}

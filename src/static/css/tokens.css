@@ -1,0 +1,65 @@
+/*
+ * Phoenix design tokens — "Night ledger"
+ *
+ * One source of truth for color / typography / spacing across the dashboard
+ * shell, settings, share view, and report partials. Replaces the duplicated
+ * :root blocks that used to live in dashboard.css, tob.css, pnl.css, etc.
+ *
+ * Design intent: a financial-tool dark theme that doesn't read as a generic
+ * Tailwind starter. Warm charcoal backgrounds (stone neutrals, not blue-
+ * slate), Phoenix green from the logo as the brand accent, deep gold for
+ * business accounts, cool steel reserved for "amount you owe" figures.
+ */
+
+:root {
+  /* ---- Surfaces ---- */
+  /* Warm charcoal (stone-950 → stone-900). NOT #0f172a slate. */
+  --bg:           #141210;
+  --surface:      #1c1917;       /* card / panel background          */
+  --surface-2:    #292524;       /* nested panel / table-header band */
+  --border:       #3f3a36;       /* hairline divider between panels  */
+  --border-soft:  #2a2522;       /* even softer divider inside panel */
+
+  /* ---- Text ---- */
+  --text:         #fafaf9;       /* headings + primary body          */
+  --text-muted:   #a8a29e;       /* secondary labels + meta lines    */
+  --text-faint:   #78716c;       /* timestamps + tertiary captions   */
+
+  /* ---- Brand ---- */
+  --phoenix:      #16a34a;       /* logo green: primary accent       */
+  --phoenix-dim:  #15803d;       /* hover / pressed state            */
+  --phoenix-glow: rgba(22, 163, 74, 0.12);   /* row hover wash        */
+
+  /* ---- Per-account accent ---- */
+  --personal:     #16a34a;       /* personal accounts use the green  */
+  --business:     #d4a012;       /* warm gold (deep, not neon)       */
+
+  /* ---- Semantic ---- */
+  --gain:         #4ade80;       /* positive P&L                     */
+  --loss:         #f87171;       /* negative P&L                     */
+  --tax-due:      #7dd3fc;       /* ONLY for "amount owed" figures   */
+  --warn:         #fbbf24;
+  --warn-bg:      rgba(251, 191, 36, 0.08);
+
+  /* ---- Legacy aliases ----
+   * Kept so existing CSS that still references the old token names
+   * (--panel, --panel-2, --accent, --muted, --green, --red) keeps
+   * working through the Phase-1 visual overhaul. Phase 2 will delete
+   * these once every callsite has migrated. */
+  --panel:        var(--surface);
+  --panel-2:      var(--surface-2);
+  --muted:        var(--text-muted);
+  --accent:       var(--phoenix);
+  --green:        var(--gain);
+  --red:          var(--loss);
+
+  /* ---- Typography ---- */
+  --font-heading: 'Newsreader', 'Source Serif Pro', Georgia, serif;
+  --font-ui:      'Source Sans 3', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+  /* ---- Geometry ---- */
+  --radius-sm:    4px;            /* 4px ledger-style corners         */
+  --radius-md:    6px;            /* form inputs, small buttons       */
+  --radius-lg:    8px;            /* modal boxes only                 */
+}
