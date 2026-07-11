@@ -371,6 +371,156 @@
     </p>
   </section>
 
+  <!-- 10c. Reynders tax on bond fund gains -->
+  <section id="reynders" class="section">
+    <h2>10c. Reynders tax (bond-fund capital-gains withholding)</h2>
+    <div class="info-box" style="background:rgba(56,189,248,.06);border-left:3px solid var(--accent);
+                                  padding:8px 12px;margin:0 0 12px;font-size:.88rem">
+      <strong>Scope: personal AND corporate accounts.</strong> Applies to any
+      Belgian investor selling shares of a fund whose asset allocation is more
+      than 10% in debt instruments (bonds, cash-equivalents, money-market).
+      Not applied automatically by IBKR (foreign broker) — the taxpayer
+      declares it.
+    </div>
+
+    <p>
+      The <strong>Reynders tax</strong> (named after former finance minister
+      Didier Reynders, introduced in 2013 and expanded in 2018) is a
+      <strong>30% withholding on the interest-derived portion</strong> of
+      capital gains realised on redemption or sale of shares in a bond-heavy
+      fund. As of 1 January 2018 the threshold dropped from &gt;25% bonds to
+      <strong>&gt;10% bonds</strong>, catching most mixed and short-term funds.
+    </p>
+
+    <h3>How the interest component is computed</h3>
+    <p>
+      Belgian tax law defines the taxable interest component as:
+    </p>
+    <div class="formula">
+      taxable_interest = accrued_bond_interest_at_sale
+                       − accrued_bond_interest_at_buy
+    </div>
+    <p>
+      For funds without a compliant asset-detail statement ("TIS-compliant"),
+      the tax is computed on the <strong>entire capital gain</strong> as a
+      punitive default. For TIS-compliant funds, the fund provides the interest
+      breakdown and only the interest slice is taxed at 30%.
+    </p>
+
+    <h3>What Phoenix does — and does NOT do</h3>
+    <ul>
+      <li><strong>Phoenix does NOT auto-detect Reynders-eligible funds.</strong>
+          IBKR's broker feed does not include the fund's bond-allocation ratio.
+          Detecting it would require pulling the fund's KID / TIS statement
+          separately, which is out of scope.</li>
+      <li>Any ETF / UCITS / SICAV realisation appears in the Belgian CGT tab
+          (individuals) and Corporate Tax tab (companies) as a normal capital
+          gain. That is correct for pure-equity funds. For bond-heavy funds,
+          you must apply the 30% Reynders tax on the interest slice
+          <em>separately</em> in your return.</li>
+      <li>The Dividends tab already flags fund distributions as
+          "not eligible for the €833 exemption", which is a related-but-different
+          rule (see section 11 below).</li>
+    </ul>
+
+    <p>
+      <strong>Practical rule of thumb:</strong> if the sold instrument is a
+      bond ETF (AGG, BND, TLT, BNDX, EMB, …), a mixed-asset fund, or a target-date
+      fund with &gt;10% bond allocation, ask your accountant to apply the
+      30% Reynders on the interest slice of that specific lot's gain before
+      filing.
+    </p>
+
+    <h3>Source</h3>
+    <p>
+      Belgian Income Tax Code (CIR/WIB92) art. 19bis; law of 26 December 2015
+      and law of 25 December 2017 (threshold change 25% → 10%).
+      SPF Finances circular <em>2018/C/48</em>.
+    </p>
+  </section>
+
+  <!-- 10d. Crypto for individuals -->
+  <section id="crypto-personal" class="section">
+    <h2>10d. Crypto — personal (individual) treatment</h2>
+    <div class="info-box" style="background:rgba(245,158,11,.06);border-left:3px solid #f59e0b;
+                                  padding:8px 12px;margin:0 0 12px;font-size:.88rem">
+      <strong>Scope: PERSONAL accounts only.</strong> Crypto lots are
+      auto-flagged in the CGT tab and shown in a dedicated section (they are
+      NOT taxed at the 10% 2026 CGT rate). For business accounts, crypto is
+      ordinary corporate income at {{ cit_rate_pct }}% — see section 10b.
+    </div>
+
+    <p>
+      The 2026 CGT law's <strong>"financial instruments"</strong> scope covers
+      securities, cash, bonds, funds, and derivatives. <strong>Cryptocurrencies
+      are excluded</strong> from that definition. For Belgian individuals,
+      crypto gains fall into one of three tax regimes based on how you traded
+      them — the classification is a facts-and-circumstances test the tax
+      administration applies case-by-case:
+    </p>
+
+    <table class="math-table">
+      <thead><tr><th>Regime</th><th>Rate</th><th>Typical profile</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Normal management of private assets</strong><br>
+              <span class="muted">"Bon père de famille"</span></td>
+          <td class="num">0%</td>
+          <td>Buy-and-hold, no leverage, few trades, no borrowed funds.
+              Still <em>reportable</em> as informational income.</td>
+        </tr>
+        <tr>
+          <td><strong>Diverse income</strong><br>
+              <span class="muted">Revenus divers, art. 90, 1°</span></td>
+          <td class="num">33%</td>
+          <td>Speculative activity — frequent trades, use of leverage, active
+              portfolio management outside "normal" behaviour. Flat 33%.</td>
+        </tr>
+        <tr>
+          <td><strong>Professional income</strong><br>
+              <span class="muted">Revenus professionnels</span></td>
+          <td class="num muted">progressive</td>
+          <td>Trading as your main or significant secondary activity. Taxed
+              at the progressive personal-income brackets (up to 50%) plus
+              social contributions.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>What Phoenix does</h3>
+    <ul>
+      <li><strong>Trade ingestion tags each lot as <code>asset_class</code>
+          = crypto</strong> based on IBKR's <em>assetCategory</em> field or on
+          the manual-trade form dropdown. This flag flows through the FIFO
+          matcher to the closed-lot rows.</li>
+      <li>The <strong>CGT tab</strong> excludes crypto lots from the 10%
+          calculation entirely (they are flagged
+          <code>n/a (crypto — excluded from 2026 CGT)</code>) and surfaces
+          the lifetime crypto net + per-year rows in a dedicated banner so
+          the taxpayer can pick a regime with their accountant.</li>
+      <li>The <strong>P&amp;L tab</strong> continues to include crypto lots in
+          realised P&amp;L — that view is about performance, not tax.</li>
+      <li>Crypto lots are <em>never</em> reconciled against IBKR position
+          snapshots (IBKR statements don't contain crypto positions) — the
+          closed-lot list is the source of truth for realised crypto activity.</li>
+    </ul>
+
+    <p>
+      <strong>Bottom line:</strong> Phoenix cannot classify your crypto
+      activity for you (the tax administration applies a fact-based test).
+      What it does is give you the numbers each of the three regimes would
+      compute against, so you and your accountant can make the call and file
+      the correct treatment.
+    </p>
+
+    <h3>Source</h3>
+    <p>
+      Belgian CIR/WIB92 art. 90, 1° (diverse income); SPF Finances rulings on
+      crypto (<em>SDA / DVB</em>, various); parliamentary Q&amp;A on the 2026
+      CGT scope excluding crypto assets.
+    </p>
+  </section>
+
   <!-- 11. Dividends -->
   <section id="dividends" class="section">
     <h2>11. Dividends and foreign withholding tax</h2>

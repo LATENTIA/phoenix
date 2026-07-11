@@ -369,6 +369,53 @@ def build_dividends_html(account_code: str, as_partial: bool = False) -> str:
     )
 
 
+def build_dividends_csv(account_code: str) -> str:
+    """Per-payment dividend rows as CSV. Gross + WHT + net EUR, pay date,
+    symbol, source country. Reuses the same pipeline as the HTML report so
+    numbers match exactly."""
+    conn = _db.connect()
+    _db.init_schema(conn)
+    div = _db.get_dividends(conn, account_code)
+    wht = _db.get_withholding(conn, account_code)
+    conn.close()
+    if div.empty:
+        return "pay_date,symbol,gross_usd,wht_usd,gross_eur,wht_eur,net_eur,country\n"
+
+    fx_cache: dict = {}
+    div = div.copy()
+    div["amount_eur"] = [
+        _eur_for(a, d, fx_cache) for a, d in zip(div["amount"], div["pay_date"])
+    ]
+    if not wht.empty:
+        wht = wht.copy()
+        wht["amount_eur"] = [
+            _eur_for(a, d, fx_cache) for a, d in zip(wht["amount"], wht["pay_date"])
+        ]
+    else:
+        wht = pd.DataFrame(columns=["pay_date", "symbol", "per_share",
+                                    "amount", "amount_eur", "source_country"])
+    paired = _pair_dividends_with_wht(div, wht)
+    paired["wht_amount_eur"] = [
+        _eur_for(a, d, fx_cache) if a else 0.0
+        for a, d in zip(paired["wht_amount"], paired["pay_date"])
+    ]
+    paired["net_eur"] = paired.get("amount_eur", 0) + paired.get("wht_amount_eur", 0)
+
+    cols_map = {
+        "pay_date": "pay_date",
+        "symbol": "symbol",
+        "amount": "gross_usd",
+        "wht_amount": "wht_usd",
+        "amount_eur": "gross_eur",
+        "wht_amount_eur": "wht_eur",
+        "net_eur": "net_eur",
+        "source_country": "country",
+    }
+    keep = [c for c in cols_map if c in paired.columns]
+    out = paired[keep].rename(columns=cols_map).sort_values("pay_date", ascending=False)
+    return out.to_csv(index=False)
+
+
 # ---------- HTML rendering ----------
 
 def _render_annual_rows(annual: pd.DataFrame) -> str:
@@ -558,7 +605,30 @@ def render_html(
         missing_years = []
 
     # Latest exemption cap (for the rules text)
-    latest_cap = _exemption_cap_for(2026)
+    current_year = datetime.now().year
+    latest_cap = _exemption_cap_for(current_year)
+
+    # Current-year exemption tracker: dividend income received so far this year
+    # against the €833 annual cap. Rendered as a hero widget with a progress
+    # bar so the taxpayer knows how much headroom they have left before the
+    # exemption saturates and further ordinary dividends become taxable at 30%.
+    current_row = None
+    if not annual.empty:
+        rows = annual[annual["year"].astype(str) == str(current_year)]
+        if not rows.empty:
+            current_row = rows.iloc[0].to_dict()
+    if current_row:
+        cy_eligible_gross = float(current_row.get("exempt_gross_eur", 0.0))
+        cy_cap = float(current_row.get("exemption_cap_eur", latest_cap))
+        cy_used_pct = min(100.0, (cy_eligible_gross / cy_cap * 100.0)) if cy_cap else 0.0
+        cy_headroom = max(0.0, cy_cap - cy_eligible_gross)
+        cy_saving = float(current_row.get("exemption_saving_eur", 0.0))
+    else:
+        cy_eligible_gross = 0.0
+        cy_cap = float(latest_cap)
+        cy_used_pct = 0.0
+        cy_headroom = float(latest_cap)
+        cy_saving = 0.0
 
     return render_report(
         "dividends.html",
@@ -592,6 +662,13 @@ def render_html(
         us_treaty_rate_pct=US_TREATY_WHT_RATE * 100,
         latest_cap=latest_cap,
         exemption_cap_per_year=EXEMPTION_CAP_PER_YEAR,
+        # Current-year exemption tracker (hero widget)
+        current_year=current_year,
+        cy_eligible_gross=cy_eligible_gross,
+        cy_cap=cy_cap,
+        cy_used_pct=cy_used_pct,
+        cy_headroom=cy_headroom,
+        cy_saving=cy_saving,
     )
 
 

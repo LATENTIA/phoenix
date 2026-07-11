@@ -195,28 +195,53 @@ limiter = Limiter(
     headers_enabled=True,        # adds X-RateLimit-* and Retry-After response headers
 )
 
-# Security headers (CSP, X-Frame-Options, etc.). force_https=False because
-# we haven't wired TLS yet; the proxy/ALB will handle it later.
-# Templates use lots of inline <style> / <script> tags, so allow 'unsafe-inline'.
-# Tightening to nonces would mean rewriting every template.
+# Security headers (CSP, X-Frame-Options, etc.). Templates use lots of
+# inline <style> / <script> tags, so we keep 'unsafe-inline' for now.
+# Tightening to nonces would mean rewriting every template + threading the
+# nonce through the partial-fetch script-cloning path in dashboard.js.
+# The additions we DO include (object-src, base-uri, form-action) block
+# specific injection primitives without any template disruption.
 _csp = {
     "default-src": "'self'",
-    "style-src": ["'self'", "'unsafe-inline'"],
+    "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
     "script-src": ["'self'", "'unsafe-inline'"],
     "img-src": ["'self'", "data:"],
-    "font-src": "'self'",
+    "font-src": ["'self'", "https://fonts.gstatic.com"],
+    "connect-src": "'self'",
     "frame-src": "'self'",
     "frame-ancestors": "'self'",
+    # No <object>/<embed>/<applet> anywhere in the app, so lock them out:
+    # blocks a class of Flash/plugin-based XSS payloads even in older browsers.
+    "object-src": "'none'",
+    # <base href="..."> would let an injected tag rewrite every relative URL
+    # on the page to point at the attacker's origin. We never set <base>, so
+    # lock it out entirely.
+    "base-uri": "'none'",
+    # All forms POST back to this origin; block cross-origin form submission
+    # so an injected <form action="attacker.com"> can't harvest input.
+    "form-action": "'self'",
 }
+
+# HTTPS-dependent headers. Turned on in production (Caddy terminates TLS at
+# phoenix.latentia.ai) so cookies get the Secure flag and the browser will
+# refuse to downgrade to HTTP. Kept OFF locally because the dev server runs
+# on plain http://127.0.0.1:5000 — Secure cookies would never be sent,
+# breaking Basic Auth sessions, and HSTS on 127.0.0.1 has no effect anyway
+# but leaves a lingering header preference. Toggle by exporting
+# PHOENIX_HTTPS=1 in the container's environment (.env or docker-compose).
+_HTTPS_MODE = os.environ.get("PHOENIX_HTTPS", "").strip().lower() in ("1", "true", "yes", "on")
+
 talisman = Talisman(
     app,
-    force_https=False,
+    force_https=False,                       # Caddy handles the redirect
     content_security_policy=_csp,
     content_security_policy_nonce_in=[],
     frame_options="SAMEORIGIN",
     referrer_policy="strict-origin-when-cross-origin",
-    session_cookie_secure=False,            # set True once HTTPS lands
-    strict_transport_security=False,        # ditto
+    session_cookie_secure=_HTTPS_MODE,       # Secure flag ON in prod, OFF locally
+    strict_transport_security=_HTTPS_MODE,
+    strict_transport_security_max_age=63072000,   # 2 years, matches Caddy default
+    strict_transport_security_include_subdomains=False,   # phoenix.latentia.ai only
 )
 
 
@@ -1024,6 +1049,52 @@ def report(kind: str, account: str):
     return Response(body, mimetype="text/html; charset=utf-8")
 
 
+@app.route("/report/<kind>/<account>/csv")
+@limiter.limit("30 per minute")
+def report_csv(kind: str, account: str):
+    """Download the report's underlying data as CSV. One row per transaction
+    (TOB / P&L / CGT / Dividends) or per year (Corporate Tax). Intended for
+    the accountant workflow: hand the CSV to the tax filer without asking
+    them to paste values out of an HTML table."""
+    log.info(f"report_csv: kind={kind} account={account}")
+    accs = account_service.get_accounts()
+    name_to_code = {a["name"]: c for c, a in accs.items()}
+    if account not in name_to_code:
+        abort(404)
+    code = name_to_code[account]
+    acc_type = (accs.get(code) or {}).get("type", "personal")
+    if kind == "cgt" and acc_type != "personal":
+        abort(404)
+    if kind == "corporate_tax" and acc_type != "business":
+        abort(404)
+
+    if kind == "tob":
+        from reports import tob as _tob
+        body = _tob.build_tob_csv(code)
+    elif kind == "pnl":
+        from reports import pnl as _pnl
+        body = _pnl.build_pnl_csv(code)
+    elif kind == "cgt":
+        from reports import cgt as _cgt
+        body = _cgt.build_cgt_csv(code)
+    elif kind == "dividends":
+        from reports import dividends as _div
+        body = _div.build_dividends_csv(code)
+    elif kind == "corporate_tax":
+        from reports import corporate_tax as _ct
+        body = _ct.build_corporate_tax_csv(code)
+    else:
+        abort(404, f"No CSV export for report kind: {kind}")
+
+    stamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{account}-{kind}-{stamp}.csv"
+    return Response(
+        body,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # FX rate maintenance (ECB EUR/USD reference rates).
 # ---------------------------------------------------------------------------
@@ -1256,6 +1327,59 @@ def share_report(token: str, kind: str):
         raise
     body = html if as_partial else _maybe_apply_embed_mode(html)
     return Response(body, mimetype="text/html; charset=utf-8")
+
+
+@app.route("/share/<token>/report/<kind>/csv")
+@limiter.limit("30 per minute")
+def share_report_csv(token: str, kind: str):
+    """CSV download for a shared report. Same access rules as share_report:
+    token must be valid, account must be in the share, and the tab must be
+    allowed for that account. 404 on any failure to match the HTML route's
+    opacity."""
+    share = _share_or_404(token)
+    code = (request.args.get("account") or "").strip()
+    shared = share.get("accounts") or {}
+    if code not in shared:
+        abort(404)
+    allowed = set(shared[code])
+    if kind == "pnl" and ("pnl" in allowed or "performance" in allowed):
+        pass
+    elif kind in allowed and kind in KNOWN_REPORT_KINDS:
+        pass
+    else:
+        abort(404)
+    accs = account_service.get_accounts()
+    acc_type = (accs.get(code) or {}).get("type", "personal")
+    if kind == "cgt" and acc_type != "personal":
+        abort(404)
+    if kind == "corporate_tax" and acc_type != "business":
+        abort(404)
+
+    if kind == "tob":
+        from reports import tob as _tob
+        body = _tob.build_tob_csv(code)
+    elif kind == "pnl":
+        from reports import pnl as _pnl
+        body = _pnl.build_pnl_csv(code)
+    elif kind == "cgt":
+        from reports import cgt as _cgt
+        body = _cgt.build_cgt_csv(code)
+    elif kind == "dividends":
+        from reports import dividends as _div
+        body = _div.build_dividends_csv(code)
+    elif kind == "corporate_tax":
+        from reports import corporate_tax as _ct
+        body = _ct.build_corporate_tax_csv(code)
+    else:
+        abort(404, f"No CSV export for report kind: {kind}")
+    acc_name = (accs.get(code) or {}).get("name", code)
+    stamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{acc_name}-{kind}-{stamp}.csv"
+    return Response(
+        body,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ---------- Admin routes for managing share links ----------

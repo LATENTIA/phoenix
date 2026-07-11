@@ -31,6 +31,26 @@
       <div class="value neg"><strong>{{ "{:,.2f}".format(-totals.cit_payable_eur) }}</strong></div></div>
   </section>
 
+  {# Asset-class split — stocks vs crypto. Belgian CIT taxes both at the
+     same 25% flat rate, but the split makes it easy for the accountant
+     to reconcile against the company's ledger, and it's the natural
+     hook for the crypto/Reynders rules covered in Methodology. #}
+  {% if totals.n_crypto or totals.crypto_net_eur %}
+  <section class="cards" style="margin-top:0" aria-label="Asset-class split">
+    <div class="card"><div class="label">Realised P&amp;L, stocks (EUR)</div>
+      <div class="value {{ 'pos' if totals.stock_net_eur >= 0 else 'neg' }}">
+        {{ "{:,.2f}".format(totals.stock_net_eur) }}
+      </div></div>
+    <div class="card"><div class="label">Realised P&amp;L, crypto (EUR)</div>
+      <div class="value {{ 'pos' if totals.crypto_net_eur >= 0 else 'neg' }}">
+        {{ "{:,.2f}".format(totals.crypto_net_eur) }}
+      </div>
+      <div class="muted" style="font-size:.75rem;margin-top:4px">
+        {{ totals.n_crypto|int }} closed lot{{ '' if totals.n_crypto == 1 else 's' }} · same {{ cit_rate_pct }}% CIT rate
+      </div></div>
+  </section>
+  {% endif %}
+
   {# ---------------------------------------------------------------- #}
   {# Rules box: makes the framework explicit so the accountant can     #}
   {# audit the numbers without reading the source.                     #}

@@ -69,24 +69,46 @@ CIT_RATE = 0.25
 # Yearly aggregations.
 # ---------------------------------------------------------------------------
 
+def _is_crypto(row) -> bool:
+    """Crypto lots come out of the pnl engine with asset_category == 'CRYPTO'
+    (either set explicitly by manual trades or derived from IBKR's Flex XML
+    assetCategory field for symbols like BTC-USD). Everything else is
+    treated as a security (STK / OPT / bond ETF / etc)."""
+    return str(row.get("asset_category") or "").upper() == "CRYPTO"
+
+
 def _compute_realized_by_year(closed: pd.DataFrame) -> pd.DataFrame:
     """Per-year split of FIFO-closed lots. Both gains AND losses matter for
     a corporate: losses are fully deductible against any other corporate
-    income, so we keep them as a negative number and let the sum flow."""
+    income, so we keep them as a negative number and let the sum flow.
+
+    Also splits stocks vs crypto so the Corporate Tax tab can surface both
+    lines independently. The Belgian CIT regime taxes both at the same 25%
+    flat rate, so the split is purely for audit-trail clarity (see the
+    Methodology tab's crypto section for the personal-vs-business
+    distinction — the personal 2026+ CGT law explicitly excludes crypto
+    from its 10% regime, keeping crypto under the older "miscellaneous
+    income" 33% flat rate for speculative activity)."""
     if closed is None or closed.empty or "close_year" not in closed.columns:
         return pd.DataFrame()
     df = closed.dropna(subset=["close_year"]).copy()
     if df.empty:
         return pd.DataFrame()
+    df["_is_crypto"] = df.apply(_is_crypto, axis=1)
     rows = []
     for year, g in df.groupby("close_year"):
         pnl = g["realized_pnl_eur"]
+        stock = g[~g["_is_crypto"]]
+        crypto = g[g["_is_crypto"]]
         rows.append({
             "year": int(year),
             "n_closed": int(len(g)),
             "gains_eur": float(pnl[pnl > 0].sum() or 0.0),
             "losses_eur": float(pnl[pnl < 0].sum() or 0.0),    # negative
             "realized_net_eur": float(pnl.sum() or 0.0),
+            "stock_net_eur": float(stock["realized_pnl_eur"].sum() or 0.0),
+            "crypto_net_eur": float(crypto["realized_pnl_eur"].sum() or 0.0),
+            "n_crypto": int(len(crypto)),
         })
     return pd.DataFrame(rows).sort_values("year", ascending=False).reset_index(drop=True)
 
@@ -128,6 +150,9 @@ def _merge_annual(realized: pd.DataFrame, divs: pd.DataFrame) -> pd.DataFrame:
         merged["gains_eur"]        = 0.0
         merged["losses_eur"]       = 0.0
         merged["realized_net_eur"] = 0.0
+        merged["stock_net_eur"]    = 0.0
+        merged["crypto_net_eur"]   = 0.0
+        merged["n_crypto"]         = 0
     elif divs.empty:
         merged = realized.copy()
         merged["n_div"]            = 0
@@ -258,6 +283,9 @@ def build_corporate_tax_html(account_code: str, method: str = "FIFO",
         "cit_due_eur":      float(annual["cit_due_eur"].sum())      if not annual.empty else 0.0,
         "ftc_eur":          float(annual["ftc_eur"].sum())          if not annual.empty else 0.0,
         "cit_payable_eur":  float(annual["cit_payable_eur"].sum())  if not annual.empty else 0.0,
+        "stock_net_eur":    float(annual["stock_net_eur"].sum())    if not annual.empty and "stock_net_eur" in annual.columns else 0.0,
+        "crypto_net_eur":   float(annual["crypto_net_eur"].sum())   if not annual.empty and "crypto_net_eur" in annual.columns else 0.0,
+        "n_crypto":         int(annual["n_crypto"].sum())           if not annual.empty and "n_crypto" in annual.columns else 0,
     }
 
     # No per-trade / per-dividend tables here on purpose: the P&L tab is
@@ -275,3 +303,62 @@ def build_corporate_tax_html(account_code: str, method: str = "FIFO",
         annual=annual.to_dict("records") if not annual.empty else [],
         totals=totals,
     )
+
+
+def build_corporate_tax_csv(account_code: str, method: str = "FIFO") -> str:
+    """Annual CIT roll-up as CSV — one row per year with realised gains,
+    losses, dividends gross, foreign WHT (creditable), CIT base, CIT @ 25%,
+    FTC credit, net CIT payable. Matches the "By year" table shown on the
+    Corporate Tax tab. Convenience for the accountant to plug straight
+    into the company's tax return."""
+    method = method.upper()
+    conn = _db.connect()
+    _db.init_schema(conn)
+    trades = _db.get_trades(conn, account_code)
+    div_raw = _db.get_dividends(conn, account_code)
+    wht_raw = _db.get_withholding(conn, account_code)
+    if trades.empty and div_raw.empty:
+        conn.close()
+        return "year,gains_eur,losses_eur,realized_net_eur,gross_eur,wht_eur,cit_base_eur,cit_due_eur,ftc_eur,cit_payable_eur\n"
+    closed = pd.DataFrame()
+    if not trades.empty:
+        trades = _pnl.dedupe(trades)
+        ca_actions = _pnl._group_ca_actions(_db.get_corporate_actions(conn, account_code))
+        xf_df = _db.get_transfers(conn, account_code)
+        known_accounts = _db.get_known_accounts(conn)
+        transfers = [xf for xf in xf_df.to_dict("records")
+                     if not (xf.get("direction") == "IN" and xf.get("xfer_account") in known_accounts)]
+        snaps = _db.get_open_positions_snapshots(conn, account_code)
+        snaps.sort(key=lambda t: t[0])
+        closed, _open_df = _pnl.match_lots(
+            trades, ca_actions=ca_actions, transfers=transfers,
+            reconcile_snapshots=snaps, method=method,
+        )
+    conn.close()
+    paired = pd.DataFrame()
+    if not div_raw.empty:
+        fx_cache: dict = {}
+        div = div_raw.copy()
+        div["amount_eur"] = [
+            _div._eur_for(a, d, fx_cache) for a, d in zip(div["amount"], div["pay_date"])
+        ]
+        if not wht_raw.empty:
+            wht = wht_raw.copy()
+            wht["amount_eur"] = [
+                _div._eur_for(a, d, fx_cache) for a, d in zip(wht["amount"], wht["pay_date"])
+            ]
+        else:
+            wht = pd.DataFrame(columns=[
+                "pay_date", "symbol", "per_share", "amount", "amount_eur", "source_country",
+            ])
+        paired = _div._pair_dividends_with_wht(div, wht)
+        paired["wht_amount_eur"] = [
+            _div._eur_for(a, d, fx_cache) if a else 0.0
+            for a, d in zip(paired["wht_amount"], paired["pay_date"])
+        ]
+    realized_by_year = _compute_realized_by_year(closed)
+    divs_by_year = _compute_dividends_by_year(paired)
+    annual = _merge_annual(realized_by_year, divs_by_year)
+    if annual.empty:
+        return "year,gains_eur,losses_eur,realized_net_eur,gross_eur,wht_eur,cit_base_eur,cit_due_eur,ftc_eur,cit_payable_eur\n"
+    return annual.to_csv(index=False)

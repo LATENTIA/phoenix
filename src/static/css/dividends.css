@@ -12,6 +12,32 @@ h1 .account{color:var(--accent)}
 h3{margin:24px 0 8px;font-size:1.05rem;color:var(--text)}
 .muted{color:var(--muted);font-size:.9rem}
 
+/* €833 exemption tracker — hero widget on the Dividends report. */
+.exemption-tracker{background:var(--panel);border:1px solid var(--border);
+                    border-left:3px solid var(--green);border-radius:10px;
+                    padding:16px 20px;margin:20px 0 8px}
+.exemption-tracker .track-head{display:flex;gap:32px;align-items:flex-end;
+                                flex-wrap:wrap;margin-bottom:10px}
+.exemption-tracker .track-label{color:var(--muted);font-size:.72rem;
+                                 text-transform:uppercase;letter-spacing:.05em}
+.exemption-tracker .track-value{font-size:1.35rem;margin-top:4px;
+                                 font-variant-numeric:tabular-nums}
+.exemption-tracker .track-value strong{font-weight:600}
+.exemption-tracker .track-value .muted{font-size:.9rem;margin-left:6px;font-weight:400}
+.exemption-tracker .track-side{margin-left:auto;text-align:right}
+.exemption-tracker .track-side + .track-side{margin-left:24px}
+.exemption-tracker .track-side-label{color:var(--muted);font-size:.7rem;
+                                      text-transform:uppercase;letter-spacing:.05em}
+.exemption-tracker .track-side-value{font-size:1.1rem;font-weight:600;margin-top:2px;
+                                      font-variant-numeric:tabular-nums}
+.exemption-tracker .track-side-value.pos{color:var(--green)}
+.exemption-tracker .track-side-value.neg{color:var(--red)}
+.exemption-tracker .track-bar-wrap{background:var(--panel-2);border-radius:999px;
+                                    height:10px;overflow:hidden;margin:8px 0 10px}
+.exemption-tracker .track-bar{background:linear-gradient(90deg,var(--green),#f59e0b 80%,var(--red));
+                               height:100%;border-radius:999px;transition:width .3s ease}
+.exemption-tracker .track-foot{font-size:.82rem;margin-top:2px}
+
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:24px 0}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
 .card .label{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}

@@ -111,6 +111,14 @@
       {% endfor %}
       <span class="muted" style="padding:6px 12px;font-size:.85rem">view-only</span>
     </div>
+    {# Per-report CSV download. Href is patched by showShareReport() to
+       /share/<token>/report/<kind>/csv so the accountant can pull the raw
+       data for whatever tab they're looking at. Hidden for methodology. #}
+    <a id="csv-download" href="#" download
+       style="text-decoration:none;padding:6px 12px;font-size:.85rem;
+              background:var(--surface);border:1px solid var(--border);
+              border-radius:999px;color:var(--text-muted);white-space:nowrap"
+       title="Download the current report's underlying data as CSV">Download CSV</a>
   </div>
 
   <div class="viewonly-banner">
@@ -172,10 +180,33 @@
   // fragment the main dashboard uses and inject it directly, then
   // re-execute the embedded <script> tag so per-report JS (filters,
   // sub-tabs, view-toggles) re-binds against the fresh DOM.
+  // Reports that have a CSV export. Performance shares the P&L export
+  // (closed lots are what the Performance tab summarises), methodology
+  // has no data to export. Keep in sync with dashboard.js CSV_EXPORT_KIND.
+  const CSV_EXPORT_KIND = {
+    tob: 'tob', pnl: 'pnl', performance: 'pnl',
+    cgt: 'cgt', corporate_tax: 'corporate_tax', dividends: 'dividends',
+  };
+  function updateShareCsv(kind) {
+    const btn = document.getElementById('csv-download');
+    if (!btn) return;
+    const csvKind = CSV_EXPORT_KIND[kind];
+    if (!csvKind) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = '';
+    btn.setAttribute(
+      'href',
+      `/share/${SHARE_TOKEN}/report/${csvKind}/csv?account=${encodeURIComponent(CURRENT_CODE)}`
+    );
+  }
+
   function showShareReport(kind) {
     document.querySelectorAll('.tab').forEach(t => {
       t.classList.toggle('active', t.dataset.report === kind);
     });
+    updateShareCsv(kind);
 
     // Reflect the active tab in the share URL so an accountant refreshing
     // the browser lands on the same tab they were viewing. Same rationale

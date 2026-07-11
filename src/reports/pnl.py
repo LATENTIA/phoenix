@@ -1610,6 +1610,44 @@ def build_pnl_html(account_code: str, method: str = "FIFO",
     )
 
 
+def build_pnl_csv(account_code: str, method: str = "FIFO") -> str:
+    """Return the closed-trades table (matched FIFO lots with realised P&L)
+    as a CSV string. Excel-friendly, one row per closed lot. Reuses
+    match_lots — pricey for large accounts but data quality wins."""
+    method = method.upper()
+    conn = _db.connect()
+    _db.init_schema(conn)
+    df = _db.get_trades(conn, account_code)
+    if df.empty:
+        conn.close()
+        return "sell_date,symbol,buy_date,quantity,basis_usd,proceeds_usd,realized_pnl_usd,realized_pnl_eur\n"
+    df = dedupe(df)
+    ca_actions = _group_ca_actions(_db.get_corporate_actions(conn, account_code))
+    xf_df = _db.get_transfers(conn, account_code)
+    known_accounts = _db.get_known_accounts(conn)
+    transfers = [xf for xf in xf_df.to_dict("records")
+                 if not (xf.get("direction") == "IN" and xf.get("xfer_account") in known_accounts)]
+    reconcile_snapshots = _db.get_open_positions_snapshots(conn, account_code)
+    reconcile_snapshots.sort(key=lambda t: t[0])
+    conn.close()
+    closed, _open_df = match_lots(
+        df, ca_actions=ca_actions, transfers=transfers,
+        reconcile_snapshots=reconcile_snapshots, method=method,
+    )
+    if closed.empty:
+        return "sell_date,symbol,buy_date,quantity,basis_usd,proceeds_usd,realized_pnl_usd,realized_pnl_eur\n"
+    cols = [c for c in [
+        "sell_date", "symbol", "buy_date", "quantity",
+        "basis_usd", "proceeds_usd",
+        "buy_fx", "sell_fx",
+        "basis_eur", "proceeds_eur",
+        "realized_pnl_usd", "realized_pnl_eur",
+        "commission_buy_usd", "commission_sell_usd",
+    ] if c in closed.columns]
+    out = closed[cols].sort_values(["sell_date", "symbol"], ascending=[False, True])
+    return out.to_csv(index=False)
+
+
 # ---------- CLI ----------
 
 def main(argv=None) -> int:

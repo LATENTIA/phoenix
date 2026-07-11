@@ -415,6 +415,47 @@ def build_tob_html(account_code: str, use_overrides: bool = False,
     return render_html(trades_df, meta, as_partial=as_partial)
 
 
+def build_tob_csv(account_code: str, use_overrides: bool = False) -> str:
+    """Return the TOB report data as a CSV string — one row per trade with
+    columns matching the HTML table. Accountant-friendly: opens directly
+    in Excel. Called by app.py's /report/tob/<account>/csv route."""
+    from core import db as _db
+    conn = _db.connect()
+    _db.init_schema(conn)
+    trades_db = _db.get_trades(conn, account_code)
+    conn.close()
+    if trades_db.empty:
+        return "trade_date,symbol,buy_sell,quantity,price,proceeds_usd,commission_usd,fx_rate,rate_source,total_eur,tob_eur\n"
+
+    name = {"P": "personal", "B": "business"}.get(account_code, account_code)
+    trades_df = trades_db.copy()
+    trades_df['tradeDate'] = trades_df['tradeDate'].astype(str).str.replace('-', '', regex=False)
+    trades_df['ibCommission'] = trades_df.get('commission_usd')
+    trades_df['proceeds'] = trades_df.get('proceeds_usd')
+    _qty_num = pd.to_numeric(trades_df['quantity'], errors='coerce')
+    trades_df['buySell'] = _qty_num.apply(
+        lambda q: 'BUY' if pd.notna(q) and q > 0 else ('SELL' if pd.notna(q) and q < 0 else '')
+    )
+    overrides = load_rate_overrides(name) if use_overrides else {}
+    trades_df = add_eur_usd_rate(trades_df, rate_overrides=overrides)
+    trades_df = add_eur_and_tob(trades_df)
+
+    # Pick + rename the accountant-facing columns, sort newest first.
+    out = trades_df[[c for c in [
+        'TradeDate', 'symbol', 'buySell', 'quantity', 'tradePrice',
+        'proceeds', 'ibCommission', 'EUR_USD_Rate', 'Rate_Source',
+        'Total_EUR', 'TOB',
+    ] if c in trades_df.columns]].copy()
+    out.columns = [
+        'trade_date', 'symbol', 'buy_sell', 'quantity', 'price',
+        'proceeds_usd', 'commission_usd', 'fx_rate', 'rate_source',
+        'total_eur', 'tob_eur',
+    ][:len(out.columns)]
+    if 'trade_date' in out.columns:
+        out = out.sort_values('trade_date', ascending=False, kind='stable')
+    return out.to_csv(index=False)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Parse IBKR Flex XML and compute EUR amounts + TOB.")
     ap.add_argument("--account", "-a", type=_resolve_account, default=None,

@@ -89,6 +89,13 @@ def annotate_tax_basis(
     df = closed.copy()
     df["is_taxable_year"] = df["sell_date"].fillna("") >= REGIME_START
     df["is_pre_reset_lot"] = df["buy_date"].fillna("") < REGIME_START
+    # The 2026 CGT law scopes "financial instruments" to securities, cash,
+    # bonds, funds, and derivatives. Crypto is EXCLUDED from the 10%
+    # regime — for individuals, crypto gains remain under the older
+    # "diverse income" (33% flat, if speculative) or "normal management"
+    # (0%, if truly passive) regime. Flag crypto lots so the report can
+    # surface them in a dedicated section instead of taxing them at 10%.
+    df["is_crypto"] = df.get("asset_category", "").fillna("").astype(str).str.upper() == "CRYPTO"
 
     tax_basis_source = []
     tax_basis_eur = []
@@ -98,6 +105,14 @@ def annotate_tax_basis(
     mark_status = []
 
     for row in df.to_dict("records"):
+        if row.get("is_crypto"):
+            tax_basis_source.append("n/a (crypto — excluded from 2026 CGT)")
+            tax_basis_eur.append(None)
+            tax_basis_per_share.append(None)
+            ye_marks_used.append(None)
+            tax_realized.append(None)
+            mark_status.append("n/a")
+            continue
         if not row["is_taxable_year"]:
             tax_basis_source.append("n/a (exempt)")
             tax_basis_eur.append(None)
@@ -365,6 +380,53 @@ def build_cgt_html(account_code: str, method: str = "FIFO",
         method=method,
         as_partial=as_partial,
     )
+
+
+def build_cgt_csv(account_code: str, method: str = "FIFO") -> str:
+    """Return per-trade taxable rows as CSV — the same rows the Belgian CGT
+    2026+ report shows on the "Per-trade taxable" table, one row per
+    matched closed lot with basis, gain, exemption used, and CGT owed.
+    Reuses the CGT pipeline so numbers match the HTML report exactly."""
+    method = method.upper()
+    conn = _db.connect()
+    _db.init_schema(conn)
+    df = _db.get_trades(conn, account_code)
+    if df.empty:
+        conn.close()
+        return "sell_date,symbol,tax_realized_eur\n"
+    df = _pnl.dedupe(df)
+    ca_actions = _pnl._group_ca_actions(_db.get_corporate_actions(conn, account_code))
+    xf_df = _db.get_transfers(conn, account_code)
+    known_accounts = _db.get_known_accounts(conn)
+    transfers = [xf for xf in xf_df.to_dict("records")
+                 if not (xf.get("direction") == "IN" and xf.get("xfer_account") in known_accounts)]
+    snaps = _db.get_open_positions_snapshots(conn, account_code)
+    snaps.sort(key=lambda t: t[0])
+    ye_marks = _db.get_year_end_marks(conn, RESET_DATE)
+    fx_row = conn.execute("SELECT eur_usd FROM fx_rates WHERE date = ?", (RESET_DATE,)).fetchone()
+    fx_2025_12_31 = float(fx_row["eur_usd"]) if fx_row else None
+    conn.close()
+    auto_changes = _pnl._detect_symbol_changes(snaps, df, ca_actions, transfers=transfers)
+    closed, _open_df = _pnl.match_lots(
+        df, ca_actions=ca_actions, transfers=transfers,
+        reconcile_snapshots=snaps, method=method, auto_changes=auto_changes,
+    )
+    tax_trades = annotate_tax_basis(closed, ye_marks, fx_2025_12_31)
+    taxable = tax_trades[tax_trades.get("is_taxable_year", False) == True].copy()
+    # Crypto is excluded from the 2026 10% CGT regime (see section 10d of
+    # Methodology). Drop crypto rows from the CGT CSV so the accountant
+    # doesn't get zero-basis crypto lots mixed in with the 10% workings.
+    if "is_crypto" in taxable.columns:
+        taxable = taxable[taxable["is_crypto"] != True]
+    if taxable.empty:
+        return "sell_date,symbol,tax_realized_eur\n"
+    cols = [c for c in [
+        "sell_date", "symbol", "buy_date", "quantity",
+        "tax_basis_eur", "tax_proceeds_eur", "tax_realized_eur",
+        "basis_source",     # "actual_buy" vs "2025-12-31 mark"
+    ] if c in taxable.columns]
+    out = taxable[cols].sort_values(["sell_date", "symbol"], ascending=[False, True])
+    return out.to_csv(index=False)
 
 
 # ---------- HTML rendering ----------
@@ -712,6 +774,30 @@ def render_html(
     last_year = annual[-1] if annual else None
     carry_balance = last_year["carry_out"] if last_year else 0.0
 
+    # Crypto section — the 2026 CGT law's "financial instruments" scope
+    # explicitly excludes crypto for individuals. Show lifetime realised
+    # net so the taxpayer can self-classify their activity (0% "normal
+    # management" vs 33% "diverse income" vs progressive "professional")
+    # with their accountant.
+    crypto_by_year_rows: list[dict] = []
+    crypto_total_net_eur = 0.0
+    n_crypto = 0
+    if not tax_trades.empty and "is_crypto" in tax_trades.columns:
+        crypto_df = tax_trades[tax_trades["is_crypto"] == True].copy()
+        n_crypto = int(len(crypto_df))
+        if not crypto_df.empty:
+            crypto_df["_net"] = crypto_df.get("realized_pnl_eur", 0.0).fillna(0.0)
+            crypto_total_net_eur = float(crypto_df["_net"].sum())
+            for year, g in crypto_df.groupby("close_year"):
+                if pd.isna(year):
+                    continue
+                crypto_by_year_rows.append({
+                    "year": int(year),
+                    "n": int(len(g)),
+                    "net_eur": float(g["_net"].sum()),
+                })
+            crypto_by_year_rows.sort(key=lambda r: r["year"], reverse=True)
+
     return render_report(
         "cgt.html",
         css_files=["css/cgt.css"],
@@ -746,6 +832,10 @@ def render_html(
         max_yearly_carry=MAX_YEARLY_CARRY_EUR,
         max_carry_bank=MAX_CARRY_BANK_EUR,
         tax_rate_pct=TAX_RATE * 100,
+        # Crypto (excluded from 2026 CGT for individuals — flagged separately)
+        n_crypto=n_crypto,
+        crypto_total_net_eur=crypto_total_net_eur,
+        crypto_by_year=crypto_by_year_rows,
     )
 
 

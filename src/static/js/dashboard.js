@@ -59,6 +59,10 @@ function showReport(kind) {
     marksBtn.style.display = (kind === 'cgt') ? '' : 'none';
   }
 
+  // Point the topbar CSV button at the current report. Kinds without a
+  // CSV export (methodology, performance rolls up into pnl) hide it.
+  updateCsvDownload(kind);
+
   // Each report kind has its own route — including `performance`, which
   // the server now routes through the P&L builder with the Performance
   // sub-tab pre-activated via data-initial-tab. No more tunneling
@@ -115,6 +119,29 @@ function refreshActiveReport() {
   // share_dashboard.html.
   const active = document.querySelector('.nav-item.active, .tab.active');
   if (active && !active.classList.contains('empty')) showReport(active.dataset.report);
+}
+
+// Maps report kinds to the CSV route the server exposes. Methodology has
+// no data to export; performance shares its data with pnl so we route
+// its CSV to the pnl endpoint (closed lots, which is what the tab shows).
+const CSV_EXPORT_KIND = {
+  tob: 'tob',
+  pnl: 'pnl',
+  performance: 'pnl',
+  cgt: 'cgt',
+  corporate_tax: 'corporate_tax',
+  dividends: 'dividends',
+};
+function updateCsvDownload(kind) {
+  const btn = document.getElementById('csv-download');
+  if (!btn) return;
+  const csvKind = CSV_EXPORT_KIND[kind];
+  if (!csvKind) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  btn.setAttribute('href', `/report/${csvKind}/${CURRENT_ACCOUNT}/csv`);
 }
 
 // ---------- Toasts ----------
@@ -344,6 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const kind = marker.dataset.report;
     const marksBtn = document.getElementById('btn-fetch-marks');
     if (marksBtn) marksBtn.style.display = (kind === 'cgt') ? '' : 'none';
+    updateCsvDownload(kind);
     // Deep-link to Performance (?report=performance) is now handled
     // server-side: the partial ships with `data-initial-tab="performance"`
     // on its .report-shell wrap, and pnl.js reads it and activates the

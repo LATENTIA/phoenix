@@ -135,9 +135,22 @@ you still owe on top.
 
 A single document covering how Phoenix processes every IBKR file and how every
 figure in every report is computed: ingestion, FIFO lot accounting, corporate
-actions, transfers, FX, TOB, P&L, performance, CGT 2026+ basis reset, dividend
-exemption math, and the capital-events filter. Use it as the audit checklist
-when reviewing the output with your accountant.
+actions, transfers, FX, TOB, P&L, performance, CGT 2026+ basis reset, corporate
+income tax, Reynders tax (30% on bond-fund interest slice), crypto rules for
+personal vs corporate, dividend exemption math, and the capital-events filter.
+Use it as the audit checklist when reviewing the output with your accountant.
+
+---
+
+### 📤 CSV export per report
+
+Every tax report (TOB, P&L, CGT, Dividends, Corporate Tax) has a **Download CSV**
+button in the topbar that emits the underlying data — one row per transaction
+for the transaction reports, one row per year for the CIT roll-up. Route:
+`/report/<kind>/<account>/csv`. Share links have their own scoped CSV route at
+`/share/<token>/report/<kind>/csv?account=<code>` so an accountant with a
+view-only link can pull the raw data without shell access. Filenames encode the
+account, report kind, and generation date so multiple downloads don't collide.
 
 ---
 

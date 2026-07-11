@@ -58,6 +58,51 @@
   </div>
   {% endif %}
 
+  {% if n_crypto %}
+  {# Crypto gains are EXCLUDED from the 2026 10% CGT regime for individuals.
+     Belgian law scopes "financial instruments" to securities, cash, bonds,
+     funds, derivatives. Crypto stays under the older "miscellaneous
+     income" (33% flat, if speculative) or "normal private management"
+     (0% but reportable) treatment. We surface the totals here so the
+     taxpayer can self-classify their activity with their accountant. #}
+  <div class="warning-box" style="background:rgba(245,158,11,.06);border-left:3px solid #f59e0b">
+    <strong>🪙 Crypto — {{ n_crypto }} closed lot{{ '' if n_crypto == 1 else 's' }}
+    excluded from the 10% CGT regime.</strong>
+    Lifetime realised
+    <span class="{{ 'pos' if crypto_total_net_eur >= 0 else 'neg' }}">
+      <strong>€{{ "{:,.2f}".format(crypto_total_net_eur) }}</strong>
+    </span> on crypto — the 2026 CGT law's "financial instruments" scope
+    excludes crypto for individuals. Depending on how you traded, gains fall
+    under:
+    <ul style="margin:6px 0 0">
+      <li><strong>0% "normal private management"</strong>: buy-and-hold, no
+          leverage, no frequent trading. Still reportable.</li>
+      <li><strong>33% "diverse income"</strong>: speculative activity outside
+          normal management. Filed as <em>revenus divers</em>.</li>
+      <li><strong>Progressive personal-income rates</strong>: if your activity
+          qualifies as professional trading.</li>
+    </ul>
+    {% if crypto_by_year %}
+    <div style="margin-top:8px;font-size:.85rem">
+      Per year:
+      {% for r in crypto_by_year %}
+        <span style="margin-right:12px">
+          <strong>{{ r.year }}</strong>
+          <span class="{{ 'pos' if r.net_eur >= 0 else 'neg' }}">
+            €{{ "{:,.2f}".format(r.net_eur) }}
+          </span>
+          <span class="muted">({{ r.n }} lot{{ '' if r.n == 1 else 's' }})</span>
+        </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="muted" style="margin-top:6px;font-size:.82rem">
+      Talk to your accountant about which category applies. See the
+      Methodology tab's crypto section for full rules.
+    </div>
+  </div>
+  {% endif %}
+
   <div class="tabs" role="tablist">
     <button class="tab active" data-target="tab-summary"     role="tab">Annual summary</button>
     <button class="tab"        data-target="tab-offset"      role="tab">Loss offset detail</button>

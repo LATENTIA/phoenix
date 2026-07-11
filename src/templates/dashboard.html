@@ -220,6 +220,11 @@
     </div>
 
     <div class="spacer"></div>
+    {# CSV download for the currently active report. Href is patched by
+       dashboard.js showReport() to /report/<kind>/<account>/csv. Hidden
+       for report kinds that have no CSV export (methodology). #}
+    <a id="csv-download" class="icon-link" href="#" download
+       title="Download the current report's underlying data as CSV">CSV</a>
     {# Single privacy toggle for the whole app — Phase 2C consolidated this
        out of each report. Toggles body.privacy globally; report CSS rules
        like body.privacy td.num still apply the blur via the same class. #}

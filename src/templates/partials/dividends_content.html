@@ -4,6 +4,42 @@
   <h1>Dividends, <span class="account">{{ account }}</span></h1>
   <div class="muted">Report built: {{ now }}</div>
 
+  {# €833 exemption tracker (hero widget) — shows how much of the current
+     year's annual dividend exemption cap has been consumed so far, and
+     how much ordinary-dividend headroom remains before further dividends
+     become taxable at the 30% Belgian rate. Only "ordinary" dividends
+     count; ETFs / PIL / cap-gains distributions are excluded from the
+     eligible-gross figure that fills the bar. #}
+  <section class="exemption-tracker" aria-label="Belgian dividend exemption tracker">
+    <div class="track-head">
+      <div>
+        <div class="track-label">{{ current_year }} exemption used</div>
+        <div class="track-value">
+          <strong>€{{ "{:,.2f}".format(cy_eligible_gross) }}</strong>
+          <span class="muted">of €{{ "{:,.0f}".format(cy_cap) }} cap</span>
+        </div>
+      </div>
+      <div class="track-side">
+        <div class="track-side-label">Headroom left</div>
+        <div class="track-side-value {{ 'pos' if cy_headroom > 0 else 'neg' }}">
+          €{{ "{:,.2f}".format(cy_headroom) }}
+        </div>
+      </div>
+      <div class="track-side">
+        <div class="track-side-label">Tax saved (est.)</div>
+        <div class="track-side-value pos">€{{ "{:,.2f}".format(cy_saving) }}</div>
+      </div>
+    </div>
+    <div class="track-bar-wrap"
+         title="{{ '%.1f'|format(cy_used_pct) }}% of the annual €{{ '%.0f'|format(cy_cap) }} cap used">
+      <div class="track-bar" style="width: {{ '%.1f'|format(cy_used_pct) }}%"></div>
+    </div>
+    <div class="track-foot muted">
+      Only ordinary dividends count toward the cap. ETFs, UCITS, "Payment in
+      Lieu", and capital-return distributions are excluded (see rules below).
+    </div>
+  </section>
+
   <section class="cards">
     <div class="card"><div class="label">Years with dividends</div>
       <div class="value">{{ n_years }}</div></div>
@@ -15,11 +51,14 @@
       <div class="value neg">{{ "{:,.2f}".format(total_wht_eur) }}</div></div>
     <div class="card pnl"><div class="label">Net received (EUR)</div>
       <div class="value">{{ "{:,.2f}".format(total_net_eur) }}</div></div>
-    <div class="card pnl"><div class="label">Exempted (EUR)</div>
-      <div class="value pos">{{ "{:,.2f}".format(total_exempt_gross) }}</div></div>
-    <div class="card pnl"><div class="label">Estimated Belgian tax (EUR)</div>
+    <div class="card pnl"><div class="label">Exempted (EUR, all years)</div>
+      <div class="value pos">{{ "{:,.2f}".format(total_exempt_gross) }}</div>
+      <div class="muted" style="font-size:.72rem;margin-top:4px">
+        cumulative across {{ n_years }} year{{ '' if n_years == 1 else 's' }} · cap is €833/yr
+      </div></div>
+    <div class="card pnl"><div class="label">Estimated Belgian tax (EUR, all years)</div>
       <div class="value neg">{{ "{:,.2f}".format(-total_belgian_tax_after) }}</div></div>
-    <div class="card pnl"><div class="label">Saved by exemption (EUR)</div>
+    <div class="card pnl"><div class="label">Saved by exemption (EUR, all years)</div>
       <div class="value pos">{{ "{:,.2f}".format(total_exemption_saving) }}</div></div>
     <div class="card pnl"><div class="label">After all taxes (EUR)</div>
       <div class="value">{{ "{:,.2f}".format(total_after_all_tax) }}</div></div>
